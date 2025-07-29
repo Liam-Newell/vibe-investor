@@ -1,0 +1,35 @@
+# Docker Compose Override for Email Testing
+# Use this to test email functionality without a real SMTP server
+# 
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.email-test.yml up
+
+version: '3.8'
+
+services:
+  # Temporary SMTP server for testing
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: vibe-investor-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP port
+      - "8025:8025"  # Web UI port
+    networks:
+      - vibe-network
+    profiles:
+      - email-test
+
+  # Override main app with email testing config
+  vibe-investor:
+    environment:
+      # Override email settings for testing
+      - EMAIL_ENABLED=true
+      - SMTP_SERVER=mailhog
+      - SMTP_PORT=1025
+      - SMTP_USER=vibe@vibeinvestor.ca
+      - SMTP_PASSWORD=test
+      - ALERT_EMAIL=liam-newell@hotmail.com
+    depends_on:
+      - postgres
+      - redis
+      - mailhog 

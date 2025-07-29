@@ -1,0 +1,147 @@
+services:
+  # Main trading application
+  vibe-investor:
+    build: .
+    container_name: vibe-investor-app
+    restart: unless-stopped
+    environment:
+      - PAPER_TRADING_ONLY=true
+      - DATABASE_URL=postgresql://trader:${DB_PASSWORD}@postgres:5432/vibe_investor
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config
+    ports:
+      - "8080:8080"  # Web dashboard
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - vibe-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: vibe-investor-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vibe_investor
+      POSTGRES_USER: trader
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+      - ./database/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"  # Expose for external tools (optional)
+    networks:
+      - vibe-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trader -d vibe_investor"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: vibe-investor-cache
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"  # Expose for external tools (optional)
+    networks:
+      - vibe-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Automated backup service
+  backup:
+    image: postgres:15-alpine
+    container_name: vibe-investor-backup
+    restart: unless-stopped
+    environment:
+      - PGPASSWORD=${DB_PASSWORD}
+    volumes:
+      - ./backups:/backups
+      - ./data:/app/data:ro
+    depends_on:
+      - postgres
+    networks:
+      - vibe-network
+    command: >
+      sh -c "
+        echo 'Setting up backup cron job...'
+        echo '0 2 * * * pg_dump -h postgres -U trader -d vibe_investor > /backups/backup_$$(date +%Y%m%d_%H%M%S).sql' | crontab -
+        echo 'Starting cron daemon...'
+        crond -f
+      "
+    profiles:
+      - backup  # Optional service
+
+  # Optional: Monitoring dashboard (Grafana)
+  monitoring:
+    image: grafana/grafana:latest
+    container_name: vibe-investor-monitoring
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${DB_PASSWORD}
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"  # Grafana dashboard
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - postgres
+    networks:
+      - vibe-network
+    profiles:
+      - monitoring  # Optional service, enable with --profile monitoring
+
+  # Optional: Reverse proxy with SSL
+  proxy:
+    image: caddy:2-alpine
+    container_name: vibe-investor-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - vibe-network
+    profiles:
+      - ssl  # Optional service for SSL/domain setup
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  vibe-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16 
