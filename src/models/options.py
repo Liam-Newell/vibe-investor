@@ -120,7 +120,7 @@ class ClaudeDecision(BaseModel):
     
     # Decision details
     action: ClaudeActionType = Field(..., description="Recommended action")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence level (0-1)")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence level (0-1)")
     reasoning: str = Field(..., description="Claude's reasoning for the decision")
     
     # Market analysis
@@ -212,6 +212,33 @@ class OptionsPosition(BaseModel):
         
         return False
 
+class PerformanceHistory(BaseModel):
+    """Historical performance tracking for adaptive risk management"""
+    
+    # Recent performance trends
+    last_7_days_pnl: float = Field(0.0, description="P&L over last 7 days")
+    last_30_days_pnl: float = Field(0.0, description="P&L over last 30 days")
+    last_60_days_pnl: float = Field(0.0, description="P&L over last 60 days")
+    
+    # Win/Loss streaks
+    current_streak: int = Field(0, description="Current win/loss streak (positive=wins, negative=losses)")
+    longest_winning_streak: int = Field(0, description="Longest winning streak")
+    longest_losing_streak: int = Field(0, description="Longest losing streak") 
+    
+    # Strategy effectiveness
+    recent_win_rate: float = Field(0.0, description="Win rate over last 20 trades")
+    strategy_performance: Dict[str, float] = Field(default_factory=dict, description="Performance by strategy type")
+    
+    # Risk metrics
+    consecutive_losses: int = Field(0, description="Number of consecutive losing trades")
+    days_since_last_win: int = Field(0, description="Days since last profitable trade")
+    volatility_of_returns: float = Field(0.0, description="Standard deviation of daily returns")
+    
+    # Confidence indicators
+    performance_trend: str = Field("neutral", description="improving|declining|stable|neutral")
+    risk_confidence: float = Field(0.5, description="Confidence in current strategy (0-1)")
+    suggested_risk_adjustment: str = Field("maintain", description="increase|decrease|maintain")
+
 class PortfolioSummary(BaseModel):
     """Portfolio-wide summary and risk metrics"""
     total_value: float = Field(..., description="Total portfolio value")
@@ -234,6 +261,9 @@ class PortfolioSummary(BaseModel):
     open_positions: int = Field(0, description="Number of open positions")
     positions_by_strategy: Dict[StrategyType, int] = Field(default_factory=dict)
     
+    # Enhanced performance tracking
+    performance_history: PerformanceHistory = Field(default_factory=PerformanceHistory, description="Historical performance data")
+    
     @property
     def portfolio_utilization(self) -> float:
         """Percentage of capital deployed"""
@@ -241,6 +271,62 @@ class PortfolioSummary(BaseModel):
         if total_capital == 0:
             return 0.0
         return (self.total_value / total_capital) * 100
+    
+    @property
+    def risk_adjusted_confidence(self) -> float:
+        """Calculate confidence level based on recent performance"""
+        base_confidence = 0.5
+        
+        # Adjust based on recent performance
+        if self.performance_history.last_30_days_pnl > 0:
+            base_confidence += 0.2
+        elif self.performance_history.last_30_days_pnl < -1000:
+            base_confidence -= 0.3
+            
+        # Adjust based on win streaks
+        if self.performance_history.current_streak > 3:
+            base_confidence += 0.15
+        elif self.performance_history.current_streak < -2:
+            base_confidence -= 0.25
+            
+        # Adjust based on consecutive losses
+        if self.performance_history.consecutive_losses >= 3:
+            base_confidence -= 0.4
+            
+        return max(0.1, min(0.9, base_confidence))
+    
+    @property 
+    def suggested_position_size_multiplier(self) -> float:
+        """Suggest position size adjustment based on performance"""
+        multiplier = 1.0
+        
+        # Reduce size after losses
+        if self.performance_history.consecutive_losses >= 3:
+            multiplier *= 0.5
+        elif self.performance_history.consecutive_losses >= 2:
+            multiplier *= 0.7
+            
+        # Increase size after wins (but cap it)
+        if self.performance_history.current_streak > 3:
+            multiplier *= 1.2
+        elif self.performance_history.current_streak > 5:
+            multiplier *= 1.3
+            
+        # Cap the adjustments
+        return max(0.3, min(1.5, multiplier))
+    
+    def get_adaptive_risk_level(self) -> str:
+        """Get recommended risk level based on performance history"""
+        if self.performance_history.consecutive_losses >= 3:
+            return "very_conservative"
+        elif self.performance_history.consecutive_losses >= 2:
+            return "conservative"
+        elif self.performance_history.current_streak > 3 and self.performance_history.last_30_days_pnl > 1000:
+            return "moderate_aggressive"
+        elif self.performance_history.current_streak > 5:
+            return "aggressive"
+        else:
+            return "normal"
 
 # SQLAlchemy Database Models
 class PositionDB(Base):

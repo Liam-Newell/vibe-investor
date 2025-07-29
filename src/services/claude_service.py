@@ -22,6 +22,39 @@ from src.models.options import (
 
 logger = logging.getLogger(__name__)
 
+class MarketAssessment(BaseModel):
+    """Claude's market assessment"""
+    overall_sentiment: str
+    volatility_environment: str
+    opportunity_quality: str
+    recommended_exposure: str
+
+class CashStrategy(BaseModel):
+    """Claude's cash management strategy"""
+    action: str
+    reasoning: str
+    target_cash_percentage: float
+    urgency: str
+
+class EnhancedOptionsOpportunity(BaseModel):
+    """Enhanced options opportunity with priority"""
+    symbol: str
+    strategy_type: str
+    contracts: List[Dict[str, Any]]
+    rationale: str
+    confidence: float
+    risk_assessment: str
+    target_return: float
+    max_risk: float
+    time_horizon: int
+    priority: str = "medium"
+
+class MorningStrategyResponse(BaseModel):
+    """Complete morning strategy response from Claude"""
+    market_assessment: MarketAssessment
+    cash_strategy: CashStrategy
+    opportunities: List[EnhancedOptionsOpportunity]
+
 class ClaudeResponse(BaseModel):
     """Structured Claude response for options analysis"""
     action: ClaudeActionType
@@ -128,7 +161,7 @@ class ClaudeService:
                                      portfolio: PortfolioSummary,
                                      market_data: Dict[str, Any],
                                      earnings_calendar: List[Dict],
-                                     current_positions: List[OptionsPosition]) -> List[OptionsOpportunity]:
+                                     current_positions: List[OptionsPosition]) -> MorningStrategyResponse:
         """
         Morning Claude session for options strategy and stock selection
         """
@@ -136,7 +169,7 @@ class ClaudeService:
         
         if self.daily_query_count >= settings.CLAUDE_MAX_DAILY_QUERIES:
             logger.warning("Daily Claude query limit reached")
-            return []
+            return self._create_fallback_response()
         
         # Prepare context for Claude
         context = self._prepare_morning_context(portfolio, market_data, earnings_calendar, current_positions)
@@ -147,6 +180,12 @@ class ClaudeService:
         Current Portfolio Status:
         {context['portfolio']}
         
+        Performance History:
+        {context['performance_history']}
+        
+        Risk Assessment:
+        {context['risk_assessment']}
+        
         Market Conditions:
         {context['market']}
         
@@ -156,43 +195,117 @@ class ClaudeService:
         Current Positions:
         {context['positions']}
         
-        TASK: Identify 2-3 high-probability options opportunities for today with 2-4 week holding periods.
+        ADAPTIVE RISK MANAGEMENT:
+        Based on your recent performance history, adjust your strategy:
+        
+        PERFORMANCE TRAJECTORY ANALYSIS:
+        - Recent P&L: 7 days: ${portfolio.performance_history.last_7_days_pnl:,.0f}, 30 days: ${portfolio.performance_history.last_30_days_pnl:,.0f}
+        - Current win/loss streak: {portfolio.performance_history.current_streak} ({'wins' if portfolio.performance_history.current_streak > 0 else 'losses' if portfolio.performance_history.current_streak < 0 else 'no streak'})
+        - Consecutive losses: {portfolio.performance_history.consecutive_losses}
+        - Days since last win: {portfolio.performance_history.days_since_last_win}
+        - Recent win rate (last 20 trades): {portfolio.performance_history.recent_win_rate:.1%}
+        - Overall win rate: {portfolio.win_rate:.1%}
+        - Current risk level: {portfolio.get_adaptive_risk_level()}
+        
+        ADAPTIVE STRATEGY RULES:
+        1. **If consecutive_losses >= 3**: VERY CONSERVATIVE - Consider 0-1 positions, focus on high-probability setups only
+        2. **If consecutive_losses >= 2**: CONSERVATIVE - Reduce position sizes by 30%, prefer lower-risk strategies  
+        3. **If losing streak + poor recent performance**: DEFENSIVE - Hold more cash, wait for better setups
+        4. **If winning streak >= 3 + profitable month**: MODERATE AGGRESSIVE - Can increase position sizes by 20%
+        5. **If winning streak >= 5**: AGGRESSIVE - Can use full position sizing, explore higher-reward setups
+        6. **If mixed/neutral performance**: NORMAL - Standard position sizing and risk levels
+        
+        POSITION SIZE ADJUSTMENT:
+        - Suggested position size multiplier: {portfolio.suggested_position_size_multiplier:.2f}
+        - Risk-adjusted confidence: {portfolio.risk_adjusted_confidence:.2f}
+        - If multiplier < 0.7: Use smaller position sizes and more conservative strategies
+        - If multiplier > 1.2: Can use larger position sizes and be more aggressive
+        
+        STRATEGY SELECTION BASED ON PERFORMANCE:
+        - After losses: Focus on higher-probability, defined-risk strategies (credit spreads, iron condors)
+        - After wins: Can explore directional plays and earnings strategies  
+        - During drawdowns: Emphasize capital preservation over growth
+        - During winning periods: Balance growth with risk management
+        
+        TASK: Analyze current market conditions and determine optimal position sizing for today.
+        You can recommend:
+        1. 0 new positions (hold cash if market conditions are unfavorable OR if performance history suggests caution)
+        2. 1-2 positions (cautious approach in uncertain markets OR after recent losses)
+        3. 3-4 positions (normal market conditions with good opportunities AND normal performance)
+        4. Up to {settings.MAX_SWING_POSITIONS - portfolio.open_positions} positions (strong market conditions + winning streak)
+        
+        POSITION SCALING STRATEGY:
+        - Maximum allowed positions: {settings.MAX_SWING_POSITIONS}
+        - Current open positions: {portfolio.open_positions}
+        - Available position slots: {settings.MAX_SWING_POSITIONS - portfolio.open_positions}
+        - CRITICAL: Scale position count based on BOTH market conditions AND performance history
+        
+        CASH MANAGEMENT DECISION CRITERIA:
+        - HOLD CASH when: Market volatility too high, unclear technical setups, major economic events pending, poor risk/reward ratios
+        - SCALE UP when: Clear directional signals, favorable IV environment, multiple uncorrelated opportunities, strong technical setups
+        - REDUCE EXPOSURE when: Approaching Greek limits, deteriorating market conditions, overextended positions
         
         CRITICAL: Consider portfolio Greeks limits:
         - Current portfolio delta: {portfolio.total_delta}
         - Current portfolio vega: {portfolio.total_vega}
-        - Maximum recommended delta exposure: ±0.3
-        - Maximum recommended vega: $500 per 1% IV move
+        - Maximum recommended delta exposure: ±{settings.MAX_PORTFOLIO_DELTA}
+        - Maximum recommended vega: ${settings.MAX_PORTFOLIO_VEGA} per 1% IV move
         
-        RESPONSE FORMAT: Return ONLY valid JSON array. No additional text, explanation, or markdown.
+        CASH MANAGEMENT: Current cash balance is ${portfolio.cash_balance:,.0f}
+        - Consider market conditions: Is this a good time to deploy capital or preserve cash?
+        - Factor in upcoming events, volatility environment, and opportunity quality
+        
+        RESPONSE FORMAT: Return ONLY valid JSON object. No additional text, explanation, or markdown.
         
         Schema:
-        [
-          {{
-            "symbol": "AAPL",
-            "strategy_type": "long_call",
-            "contracts": [
-              {{
-                "option_type": "call",
-                "strike_price": 150.0,
-                "expiration_date": "2024-02-16",
-                "quantity": 1
-              }}
-            ],
-            "rationale": "Strong technical setup with bullish divergence...",
-            "confidence": 0.85,
-            "risk_assessment": "Low risk due to defined max loss...",
-            "target_return": 50.0,
-            "max_risk": 500.0,
-            "time_horizon": 21
-          }}
-        ]
+        {{
+          "market_assessment": {{
+            "overall_sentiment": "bullish|bearish|neutral|uncertain",
+            "volatility_environment": "low|normal|elevated|extreme",
+            "opportunity_quality": "poor|fair|good|excellent",
+            "recommended_exposure": "minimal|conservative|normal|aggressive"
+          }},
+          "cash_strategy": {{
+            "action": "hold_cash|deploy_capital|reduce_exposure",
+            "reasoning": "Why this cash allocation strategy is optimal",
+            "target_cash_percentage": 40.0,
+            "urgency": "low|medium|high"
+          }},
+          "opportunities": [
+            {{
+              "symbol": "AAPL",
+              "strategy_type": "long_call",
+              "contracts": [
+                {{
+                  "option_type": "call",
+                  "strike_price": 150.0,
+                  "expiration_date": "2024-02-16",
+                  "quantity": 1
+                }}
+              ],
+              "rationale": "Strong technical setup with bullish divergence...",
+              "confidence": 0.85,
+              "risk_assessment": "Low risk due to defined max loss...",
+              "target_return": 50.0,
+              "max_risk": 500.0,
+              "time_horizon": 21,
+              "priority": "high|medium|low"
+            }}
+          ]
+        }}
         
         Analysis Focus:
         - Options with favorable IV rank vs historical volatility
         - Upcoming earnings or events that could drive volatility
         - Technical setups that suggest directional moves
         - Positions that complement existing portfolio
+        - Cash preservation vs deployment timing
+        - Portfolio Greek balance and risk limits
+        
+        DECISION FLEXIBILITY:
+        - You can recommend 0 positions if market conditions warrant cash preservation
+        - You can recommend up to {settings.MAX_SWING_POSITIONS - portfolio.open_positions} positions if conditions are optimal
+        - Always prioritize capital preservation over forcing trades
         """
         
         try:
@@ -200,12 +313,12 @@ class ClaudeService:
             opportunities = self._parse_morning_response(response)
             self.daily_query_count += 1
             
-            logger.info(f"✅ Morning session complete. Found {len(opportunities)} opportunities")
+            logger.info(f"✅ Morning session complete. Found {len(opportunities.opportunities)} opportunities")
             return opportunities
             
         except Exception as e:
             logger.error(f"❌ Morning strategy session failed: {e}")
-            return []
+            return self._create_fallback_response()
     
     async def analyze_position(self, 
                              position: OptionsPosition,
@@ -501,14 +614,35 @@ class ClaudeService:
             raise
     
     def _prepare_morning_context(self, portfolio, market_data, earnings_calendar, positions) -> Dict[str, str]:
-        """Prepare context for morning session"""
+        """Prepare context for morning session with enhanced performance tracking"""
         return {
             "portfolio": json.dumps({
                 "total_value": portfolio.total_value,
                 "cash_balance": portfolio.cash_balance,
                 "open_positions": portfolio.open_positions,
                 "total_delta": portfolio.total_delta,
-                "total_vega": portfolio.total_vega
+                "total_vega": portfolio.total_vega,
+                "total_pnl": portfolio.total_pnl,
+                "win_rate": portfolio.win_rate,
+                "max_drawdown": portfolio.max_drawdown
+            }, indent=2),
+            "performance_history": json.dumps({
+                "last_7_days_pnl": portfolio.performance_history.last_7_days_pnl,
+                "last_30_days_pnl": portfolio.performance_history.last_30_days_pnl,
+                "last_60_days_pnl": portfolio.performance_history.last_60_days_pnl,
+                "current_streak": portfolio.performance_history.current_streak,
+                "consecutive_losses": portfolio.performance_history.consecutive_losses,
+                "days_since_last_win": portfolio.performance_history.days_since_last_win,
+                "recent_win_rate": portfolio.performance_history.recent_win_rate,
+                "performance_trend": portfolio.performance_history.performance_trend,
+                "risk_confidence": portfolio.performance_history.risk_confidence,
+                "strategy_performance": portfolio.performance_history.strategy_performance
+            }, indent=2),
+            "risk_assessment": json.dumps({
+                "current_risk_level": portfolio.get_adaptive_risk_level(),
+                "risk_adjusted_confidence": portfolio.risk_adjusted_confidence,
+                "suggested_position_size_multiplier": portfolio.suggested_position_size_multiplier,
+                "portfolio_utilization": portfolio.portfolio_utilization
             }, indent=2),
             "market": json.dumps(market_data, indent=2),
             "earnings": json.dumps(earnings_calendar, indent=2),
@@ -540,8 +674,8 @@ class ClaudeService:
             }, indent=2)
         }
     
-    def _parse_morning_response(self, response: str) -> List[OptionsOpportunity]:
-        """Parse Claude's morning strategy response"""
+    def _parse_morning_response(self, response: str) -> MorningStrategyResponse:
+        """Parse Claude's enhanced morning strategy response"""
         try:
             # Clean response - remove any markdown or extra text
             cleaned = response.strip()
@@ -554,22 +688,27 @@ class ClaudeService:
             # Parse JSON directly
             data = json.loads(cleaned)
             
-            # Validate it's a list
-            if not isinstance(data, list):
-                logger.error(f"Expected array, got {type(data)}")
-                return []
+            # Validate it's an object with required keys
+            if not isinstance(data, dict):
+                logger.error(f"Expected object, got {type(data)}")
+                return self._create_fallback_response()
             
-            # Convert to OptionsOpportunity objects
-            opportunities = []
-            for item in data:
-                try:
-                    opportunity = OptionsOpportunity(**item)
-                    opportunities.append(opportunity)
-                except Exception as e:
-                    logger.error(f"Invalid opportunity format: {e}")
-                    continue
+            required_keys = ['market_assessment', 'cash_strategy', 'opportunities']
+            for key in required_keys:
+                if key not in data:
+                    logger.error(f"Missing required key: {key}")
+                    return self._create_fallback_response()
             
-            return opportunities
+            # Parse and validate the response
+            try:
+                morning_response = MorningStrategyResponse(**data)
+                logger.info(f"✅ Parsed enhanced strategy: {len(morning_response.opportunities)} opportunities, "
+                           f"cash strategy: {morning_response.cash_strategy.action}, "
+                           f"market sentiment: {morning_response.market_assessment.overall_sentiment}")
+                return morning_response
+            except Exception as e:
+                logger.error(f"Failed to validate response structure: {e}")
+                return self._create_fallback_response()
             
         except json.JSONDecodeError as e:
             logger.error(f"JSON parsing failed: {e}")
@@ -577,7 +716,25 @@ class ClaudeService:
         except Exception as e:
             logger.error(f"Failed to parse morning response: {e}")
         
-        return []
+        return self._create_fallback_response()
+    
+    def _create_fallback_response(self) -> MorningStrategyResponse:
+        """Create a conservative fallback response when parsing fails"""
+        return MorningStrategyResponse(
+            market_assessment=MarketAssessment(
+                overall_sentiment="uncertain",
+                volatility_environment="elevated",
+                opportunity_quality="poor",
+                recommended_exposure="minimal"
+            ),
+            cash_strategy=CashStrategy(
+                action="hold_cash",
+                reasoning="Unable to parse Claude response - holding cash for safety",
+                target_cash_percentage=90.0,
+                urgency="high"
+            ),
+            opportunities=[]
+        )
     
     def _parse_position_response(self, response: str, position_id: UUID, conversation_id: str) -> Optional[ClaudeDecision]:
         """Parse Claude's position analysis response"""
