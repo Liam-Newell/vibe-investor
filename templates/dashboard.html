@@ -260,21 +260,45 @@
             color: #004085;
         }
         
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .countdown-timer.urgent {
+            animation: pulse 1s infinite;
+        }
+        
+        .countdown-timer.soon {
+            animation: pulse 2s infinite;
+        }
+        
         .full-width {
             grid-column: 1 / -1;
         }
         
+        /* Mobile responsiveness */
         @media (max-width: 768px) {
             .grid {
                 grid-template-columns: 1fr;
             }
             
-            .portfolio-stats {
+            .countdown-section {
                 grid-template-columns: 1fr;
             }
             
-            .positions-table {
-                font-size: 0.9em;
+            .portfolio-stats {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .status-indicators {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .countdown-timer {
+                font-size: 1.5em;
             }
             
             .header h1 {
@@ -566,6 +590,155 @@
             // Update positions table (future enhancement)
             console.log('Positions updated:', positions);
         }
+        
+        // Countdown Timer Functions
+        function getNextClaudeSession() {
+            const now = new Date();
+            const claudeTime = new Date();
+            
+            // Set to 8:00 AM EST (13:00 UTC)
+            claudeTime.setUTCHours(13, 0, 0, 0);
+            
+            // If it's already past 8:00 AM today, set for tomorrow
+            if (now >= claudeTime) {
+                claudeTime.setDate(claudeTime.getDate() + 1);
+            }
+            
+            return claudeTime;
+        }
+        
+        function getNextMarketOpen() {
+            const now = new Date();
+            const marketOpen = new Date();
+            
+            // Set to 9:30 AM EST (14:30 UTC)
+            marketOpen.setUTCHours(14, 30, 0, 0);
+            
+            // Get current day of week (0 = Sunday, 6 = Saturday)
+            let dayOfWeek = marketOpen.getDay();
+            
+            // If it's already past 9:30 AM today, move to next day
+            if (now >= marketOpen) {
+                marketOpen.setDate(marketOpen.getDate() + 1);
+                dayOfWeek = marketOpen.getDay();
+            }
+            
+            // Skip weekends - if Saturday or Sunday, move to Monday
+            if (dayOfWeek === 0) { // Sunday
+                marketOpen.setDate(marketOpen.getDate() + 1);
+            } else if (dayOfWeek === 6) { // Saturday
+                marketOpen.setDate(marketOpen.getDate() + 2);
+            }
+            
+            return marketOpen;
+        }
+        
+        function isMarketOpen() {
+            const now = new Date();
+            const dayOfWeek = now.getDay();
+            
+            // Weekend - market closed
+            if (dayOfWeek === 0 || dayOfWeek === 6) {
+                return false;
+            }
+            
+            // Get current time in EST (UTC-5)
+            const estHour = now.getUTCHours() - 5;
+            const estMinute = now.getUTCMinutes();
+            const currentTimeMinutes = estHour * 60 + estMinute;
+            
+            // Market hours: 9:30 AM to 4:00 PM EST
+            const marketOpenMinutes = 9 * 60 + 30; // 9:30 AM
+            const marketCloseMinutes = 16 * 60;    // 4:00 PM
+            
+            return currentTimeMinutes >= marketOpenMinutes && currentTimeMinutes < marketCloseMinutes;
+        }
+        
+        function formatCountdown(targetTime) {
+            const now = new Date();
+            const diff = targetTime - now;
+            
+            if (diff <= 0) {
+                return "00:00:00";
+            }
+            
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+            
+            return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
+        function updateCountdowns() {
+            // Update Claude countdown
+            const nextClaude = getNextClaudeSession();
+            const claudeCountdown = formatCountdown(nextClaude);
+            const claudeCountdownEl = document.getElementById('claudeCountdown');
+            claudeCountdownEl.textContent = claudeCountdown;
+            
+            // Update Claude status and timer color
+            const claudeStatusEl = document.getElementById('claudeStatus');
+            const hoursUntilClaude = (nextClaude - new Date()) / (1000 * 60 * 60);
+            
+            // Color countdown timer based on proximity
+            if (hoursUntilClaude < 1) {
+                claudeCountdownEl.style.color = "#e74c3c"; // Red - imminent
+                claudeCountdownEl.className = "countdown-timer urgent"; // Add pulse animation
+                claudeStatusEl.textContent = "Starting Soon";
+                claudeStatusEl.className = "countdown-status status-active";
+            } else if (hoursUntilClaude < 3) {
+                claudeCountdownEl.style.color = "#f39c12"; // Orange - soon
+                claudeCountdownEl.className = "countdown-timer soon"; // Add slower pulse
+                claudeStatusEl.textContent = "Starting Soon";
+                claudeStatusEl.className = "countdown-status status-active";
+            } else if (hoursUntilClaude < 12) {
+                claudeCountdownEl.style.color = "#3498db"; // Blue - normal
+                claudeCountdownEl.className = "countdown-timer"; // No animation
+                claudeStatusEl.textContent = "System Ready";
+                claudeStatusEl.className = "countdown-status claude-ready";
+            } else {
+                claudeCountdownEl.style.color = "#95a5a6"; // Gray - distant
+                claudeCountdownEl.className = "countdown-timer"; // No animation
+                claudeStatusEl.textContent = "Waiting";
+                claudeStatusEl.className = "countdown-status status-inactive";
+            }
+            
+            // Update market countdown
+            const marketOpen = isMarketOpen();
+            const marketCountdownEl = document.getElementById('marketCountdown');
+            const marketStatusEl = document.getElementById('marketStatus');
+            const marketLabelEl = document.getElementById('marketLabel');
+            
+            if (marketOpen) {
+                marketCountdownEl.textContent = "OPEN";
+                marketStatusEl.textContent = "Market Open";
+                marketStatusEl.className = "countdown-status market-open";
+                marketLabelEl.textContent = "Closes: 4:00 PM EST";
+                
+                // Show countdown to market close
+                const now = new Date();
+                const marketClose = new Date();
+                marketClose.setUTCHours(21, 0, 0, 0); // 4:00 PM EST = 21:00 UTC
+                if (now < marketClose) {
+                    const closeCountdown = formatCountdown(marketClose);
+                    marketCountdownEl.textContent = `${closeCountdown}`;
+                    marketLabelEl.textContent = "Until Market Close (4:00 PM EST)";
+                }
+            } else {
+                const nextMarket = getNextMarketOpen();
+                const marketCountdown = formatCountdown(nextMarket);
+                marketCountdownEl.textContent = marketCountdown;
+                marketStatusEl.textContent = "Market Closed";
+                marketStatusEl.className = "countdown-status market-closed";
+                marketLabelEl.textContent = "Next Open: 9:30 AM EST";
+            }
+        }
+        
+        // Initialize countdowns when page loads
+        updateCountdowns();
+        
+        // Update countdowns every second
+        setInterval(updateCountdowns, 1000);
         
         // Auto-refresh every 60 seconds
         setInterval(() => {
