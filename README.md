@@ -292,19 +292,21 @@ apscheduler==3.10.4
 
 ## 🤖 Claude AI Integration
 
-**100% Autonomous Trading Process:**
-1. **Claude Autonomous Selection**: AI independently picks stocks/options based on market knowledge
+**100% Autonomous Trading Process with Web Search:**
+1. **Claude Autonomous Selection**: AI independently picks stocks/options using built-in web search tool
 2. **Live Data Validation**: System searches real-time data for Claude's autonomous picks only
 3. **Final Autonomous Decision**: Claude reviews live market conditions and confirms/modifies its own opportunities
 4. **Autonomous Execution**: Dynamic filtering and automatic position creation
 
 **Key Features:**
 - [x] Complete Claude autonomy - no human proposals or input
-- [x] Intelligent stock selection based on Claude's vast market knowledge
+- [x] **Built-in web search tool integration** for comprehensive market research
+- [x] Intelligent stock selection based on Claude's web research and market knowledge
 - [x] Targeted live data search (only for Claude's picks - efficient!)
 - [x] Real-time price validation before execution
 - [x] Adaptive strategy based on market conditions and portfolio performance
 - [x] Research-backed confidence thresholds by strategy type
+- [x] **Web search tool usage**: 5 searches for initial picks, 3 for final decisions, 4 for evening review
 
 ## 🔄 Autonomous Trading Flow
 
@@ -358,6 +360,40 @@ apscheduler==3.10.4
 1. **Performance Analysis**: Real portfolio performance vs. Claude's expectations
 2. **Position Adjustments**: Claude can modify stop losses and profit targets
 3. **Next Day Strategy**: Claude adjusts approach based on performance feedback
+4. **Web Research**: Claude searches for after-hours news and tomorrow's market catalysts
+
+## 🔍 Web Search Tool Integration
+
+### **Built-in Claude Web Search**
+The system uses Claude's native web search tool (`web_search_20250305`) for comprehensive market research:
+
+```python
+# Web search tool configuration
+tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
+```
+
+### **Web Search Usage by Session**
+- **Morning Strategy**: 5 web searches for initial stock/options research
+- **Final Decision**: 3 web searches for live data validation
+- **Evening Review**: 4 web searches for after-hours analysis
+- **Position Analysis**: 2 web searches for individual position research
+- **Emergency Analysis**: 3 web searches for urgent market research
+
+### **Research Topics**
+Claude searches for:
+- Current market sentiment and trends
+- Recent earnings announcements and analyst ratings
+- Technical analysis and support/resistance levels
+- Options flow data and unusual activity
+- Sector rotation and market catalysts
+- Breaking news affecting positions
+- After-hours market developments
+
+### **Test Web Search Integration**
+```bash
+# Test Claude's web search capabilities
+curl -X POST http://localhost:8080/api/v1/trading/test-web-search-integration
+```
 
 ## 📊 Claude's Decision-Making Framework
 

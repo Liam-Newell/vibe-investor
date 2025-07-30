@@ -21,7 +21,7 @@ from src.models.options import (
     VolatilityData, GreeksData, PortfolioSummary, EnhancedOptionsOpportunity,
     MorningStrategyResponse, MarketAssessment, CashStrategy
 )
-from src.utils.web_search import search_stock_data
+from src.utils.web_search import search_stock_data, WebSearchService
 from claude_summaries import claude_summary_manager
 
 logger = logging.getLogger(__name__)
@@ -222,13 +222,21 @@ class ClaudeService:
             return self._create_fallback_response()
     
     async def _get_claude_initial_picks(self, portfolio: PortfolioSummary, current_positions: List) -> List[Dict[str, Any]]:
-        """Step 1: Claude autonomously picks stocks/options based on its knowledge"""
+        """Step 1: Claude autonomously picks stocks/options using built-in web search tool"""
         try:
             prompt = f"""
-            🤖 AUTONOMOUS OPTIONS TRADING PICKS
+            🤖 AUTONOMOUS OPTIONS TRADING PICKS WITH WEB SEARCH RESEARCH
             
-            You are an expert options trader. Based on your knowledge of the current market environment (early 2025), 
-            independently select 3-6 specific options trading opportunities that you believe are good trades right now.
+            You are an expert options trader with access to comprehensive web search capabilities. 
+            You MUST search multiple websites and sources to formulate your trading decisions.
+            
+            WEB SEARCH REQUIREMENTS:
+            - Search Yahoo Finance, MarketWatch, Seeking Alpha, and other financial websites
+            - Research recent earnings reports, analyst ratings, and market sentiment
+            - Check technical analysis, support/resistance levels, and volume patterns
+            - Look for news catalysts, sector trends, and market-moving events
+            - Research options flow, implied volatility, and options chain data
+            - Search for institutional activity, insider trading, and market positioning
             
             CURRENT PORTFOLIO CONTEXT:
             • Portfolio value: ${portfolio.total_value:,.0f}
@@ -241,32 +249,44 @@ class ClaudeService:
             CURRENT POSITIONS (avoid duplicates):
             {[f"{p.symbol} {p.strategy_type.value}" for p in current_positions]}
             
-            YOUR TASK: AUTONOMOUSLY PICK GOOD OPTIONS TRADES
+            YOUR TASK: AUTONOMOUSLY PICK GOOD OPTIONS TRADES USING WEB RESEARCH
             
-            GUIDELINES:
-            1. Pick specific stocks/ETFs YOU believe have good options trading opportunities
-            2. Choose from high-liquidity symbols (AAPL, MSFT, GOOGL, AMZN, TSLA, SPY, QQQ, NVDA, META, etc.)
-            3. Consider what you know about:
-               - Earnings seasons and cycles
-               - Market seasonality patterns  
-               - Technical setups and support/resistance levels
-               - Volatility environments
-               - Sector rotations and trends
-            4. Mix different strategies based on your market outlook
+            RESEARCH GUIDELINES:
+            1. Search for stocks/ETFs with strong catalysts, earnings events, or technical setups
+            2. Research high-liquidity symbols (AAPL, MSFT, GOOGL, AMZN, TSLA, SPY, QQQ, NVDA, META, etc.)
+            3. Search for:
+               - Upcoming earnings announcements and analyst expectations
+               - Recent news catalysts and market-moving events
+               - Technical breakout/breakdown patterns and support/resistance
+               - Options flow data and unusual options activity
+               - Sector rotation trends and market sentiment
+               - Institutional buying/selling patterns
+               - Insider trading activity and corporate events
+            4. Mix different strategies based on your research findings
             5. Factor in the portfolio's performance streak for risk management
             6. Avoid symbols already in current positions
             
-            STRATEGY SELECTION (pick what YOU think is best):
-            - Long calls: If you're bullish on a stock
-            - Long puts: If you're bearish on a stock  
-            - Credit spreads: If you want defined risk/reward
-            - Iron condors: If you expect range-bound movement
-            - Put spreads: If you're moderately bearish
+            STRATEGY SELECTION (based on your web research):
+            - Long calls: If you find bullish catalysts, earnings beats, or technical breakouts
+            - Long puts: If you find bearish catalysts, earnings misses, or technical breakdowns
+            - Call spreads: If you're moderately bullish with defined risk tolerance
+            - Put spreads: If you're moderately bearish with defined risk tolerance
+            - Iron condors: If you find range-bound setups with high implied volatility
+            - Straddles: If you find high volatility events with uncertain direction
+            
+            WEB SEARCH PROCESS:
+            1. Search for "best options trades today" and "top stock picks"
+            2. Research each potential symbol: "AAPL stock analysis today"
+            3. Check options flow: "AAPL options flow unusual activity"
+            4. Research earnings: "AAPL earnings date expectations"
+            5. Check technical analysis: "AAPL technical analysis support resistance"
+            6. Look for news catalysts: "AAPL news today catalysts"
             
             IMPORTANT: 
-            - Make YOUR OWN decisions based on your knowledge
-            - I will search for live market data on your picks
-            - You'll get a chance to review current prices before final decision
+            - Use web search to find the BEST opportunities, not just your existing knowledge
+            - Search multiple sources to confirm your analysis
+            - I will then get live market data on your picks for final validation
+            - You'll review current prices before making final decisions
             
             RETURN FORMAT - VALID JSON ONLY:
             [
@@ -275,34 +295,40 @@ class ClaudeService:
                     "strategy_type": "long_call",
                     "initial_confidence": 0.75,
                     "rationale": "Strong iPhone demand and technical breakout expected",
-                    "reasoning": "Detailed explanation of why this is a good trade",
+                    "reasoning": "Web research shows: [Include specific findings from your searches]",
                     "time_horizon": "3-4 weeks",
-                    "expected_move": "bullish to $240"
+                    "expected_move": "bullish to $240",
+                    "web_research_summary": "Searched 5+ sources: earnings beat expected, technical breakout, options flow bullish"
                 }},
                 {{
                     "symbol": "SPY", 
                     "strategy_type": "iron_condor",
                     "initial_confidence": 0.68,
                     "rationale": "Market showing range-bound behavior, good premium collection",
-                    "reasoning": "VIX elevated, expecting sideways movement",
+                    "reasoning": "Web research shows: [Include specific findings from your searches]",
                     "time_horizon": "2-3 weeks", 
-                    "expected_move": "sideways 450-460"
+                    "expected_move": "sideways 450-460",
+                    "web_research_summary": "Searched 4+ sources: VIX elevated, range-bound setup, earnings season volatility"
                 }}
             ]
             
-            CRITICAL: Return ONLY valid JSON array. No other text, explanations, or markdown.
-            Pick trades YOU genuinely believe in based on your market knowledge.
+            CRITICAL: 
+            - Return ONLY valid JSON array. No other text, explanations, or markdown.
+            - Include web research findings in your reasoning
+            - Pick trades based on comprehensive web research, not just knowledge
+            - Search multiple websites to ensure thorough analysis
             """
             
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=2000,
                 temperature=0.4,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
                 messages=[{"role": "user", "content": prompt}]
             )
             
             content = response.content[0].text.strip()
-            logger.info(f"🤖 Claude provided autonomous trading picks")
+            logger.info(f"🤖 Claude provided autonomous trading picks with web search")
             
             # Parse JSON response with better error handling
             try:
@@ -378,35 +404,44 @@ class ClaudeService:
         return True
     
     async def _search_live_data_for_symbols(self, symbols: List[str]) -> Dict[str, Any]:
-        """Step 2: Get live market data for Claude's recommended symbols"""
+        """Step 2: Get comprehensive live market data for Claude's recommended symbols"""
         try:
-            # Import web search function
-            from src.utils.web_search import search_stock_data
-            
             live_data = {}
             
-            for symbol in symbols:
-                logger.info(f"🔍 Searching live data for {symbol}...")
-                
-                # Search for current stock data
-                search_results = await search_stock_data(symbol)
-                
-                if search_results:
-                    live_data[symbol] = search_results
-                    logger.info(f"✅ Found live data for {symbol}: ${search_results.get('price', 'N/A')}")
-                else:
-                    logger.warning(f"⚠️ No live data found for {symbol}")
-                    live_data[symbol] = {"error": "No live data available"}
+            async with WebSearchService() as search_service:
+                for symbol in symbols:
+                    logger.info(f"🔍 Comprehensive web research for {symbol}...")
+                    
+                    # Get comprehensive research data
+                    research_results = await search_service.comprehensive_stock_research(symbol)
+                    
+                    if research_results and 'error' not in research_results:
+                        live_data[symbol] = {
+                            'price_data': research_results.get('price_data', {}),
+                            'news': research_results.get('news', []),
+                            'earnings': research_results.get('earnings', {}),
+                            'technical_analysis': research_results.get('technical_analysis', {}),
+                            'market_sentiment': research_results.get('market_sentiment', {}),
+                            'sources': research_results.get('sources', []),
+                            'timestamp': research_results.get('timestamp', '')
+                        }
+                        
+                        price_data = research_results.get('price_data', {})
+                        if price_data:
+                            logger.info(f"✅ Comprehensive data for {symbol}: ${price_data.get('current_price', 'N/A')} ({price_data.get('change_pct', 0):+.2f}%)")
+                            logger.info(f"   Sources: {', '.join(research_results.get('sources', []))}")
+                            logger.info(f"   News: {len(research_results.get('news', []))} articles")
+                            logger.info(f"   Technical: {research_results.get('technical_analysis', {}).get('trend', 'N/A')}")
+                    else:
+                        logger.warning(f"⚠️ No comprehensive data found for {symbol}")
+                        live_data[symbol] = {"error": "No comprehensive data available"}
             
             return live_data
             
-        except ImportError:
-            # Fallback: use our market data service
-            logger.info("📊 Using market data service as fallback...")
-            return await self._get_market_data_fallback(symbols)
         except Exception as e:
-            logger.error(f"❌ Failed to search live data: {e}")
-            return {}
+            logger.error(f"❌ Failed to search comprehensive live data: {e}")
+            # Fallback to basic search
+            return await self._get_market_data_fallback(symbols)
     
     async def _get_market_data_fallback(self, symbols: List[str]) -> Dict[str, Any]:
         """Fallback: Use our market data service for live data"""
@@ -452,12 +487,12 @@ class ClaudeService:
             live_data_summary = self._format_live_data_for_claude(live_data)
             
             prompt = f"""
-            🤖 FINAL AUTONOMOUS TRADING DECISION WITH LIVE MARKET DATA
+            🤖 FINAL AUTONOMOUS TRADING DECISION WITH COMPREHENSIVE WEB RESEARCH DATA
             
-            Earlier, you autonomously selected these options trading opportunities:
+            Earlier, you autonomously selected these options trading opportunities based on web research:
             {json.dumps(initial_recommendations, indent=2)}
             
-            Here is the LIVE MARKET DATA for YOUR selected symbols:
+            Here is the COMPREHENSIVE WEB RESEARCH DATA for YOUR selected symbols:
             {live_data_summary}
             
             PORTFOLIO CONTEXT:
@@ -466,25 +501,39 @@ class ClaudeService:
             • Performance streak: {portfolio.performance_history.current_streak}
             • Risk level: {portfolio.get_adaptive_risk_level()}
             
-            YOUR AUTONOMOUS DECISION:
-            Looking at the live market data for YOUR selected stocks, do you want to proceed with these trades?
-            You can:
-            1. Confirm your picks with specific position details
-            2. Modify some based on current prices/conditions  
-            3. Remove any that no longer look attractive
-            4. Recommend holding cash if current conditions don't support your ideas
+            YOUR AUTONOMOUS DECISION WITH WEB RESEARCH VALIDATION:
+            You have comprehensive web research data including:
+            - Live price data and market conditions
+            - Recent news and market sentiment
+            - Technical analysis and support/resistance levels
+            - Earnings information and analyst expectations
+            - Options flow and volatility data
+            
+            Based on this comprehensive data, validate your original web research findings:
+            1. Confirm your picks if the live data supports your research
+            2. Modify positions if current conditions differ from your research
+            3. Remove opportunities that no longer look attractive
+            4. Recommend holding cash if conditions don't support your ideas
+            
+            WEB RESEARCH VALIDATION PROCESS:
+            - Compare your original research findings with live data
+            - Check if news catalysts are still relevant
+            - Verify technical levels and support/resistance
+            - Confirm earnings dates and expectations
+            - Validate options flow and sentiment data
             
             RESPONSE FORMAT (JSON ONLY):
             {{
                 "market_assessment": {{
-                    "overall_sentiment": "Your autonomous assessment of current market conditions",
-                    "key_observations": "What the live data tells you about your selected symbols",
-                    "recommended_exposure": "Conservative/Normal/Aggressive"
+                    "overall_sentiment": "Your assessment based on comprehensive web research",
+                    "key_observations": "How live data validates or contradicts your research",
+                    "recommended_exposure": "Conservative/Normal/Aggressive",
+                    "web_research_validation": "Summary of how live data confirms your research"
                 }},
                 "cash_strategy": {{
                     "action": "DEPLOY/PARTIAL_DEPLOY/HOLD_CASH",
                     "percentage": 70,
-                    "reasoning": "Why this allocation makes sense given live conditions"
+                    "reasoning": "Why this allocation makes sense given comprehensive data"
                 }},
                 "opportunities": [
                     {{
@@ -495,24 +544,28 @@ class ClaudeService:
                         "max_risk": 1200.0,
                         "time_horizon_days": 21,
                         "strike_price": 230.0,
-                        "rationale": "Updated rationale with live market context",
-                        "entry_criteria": "Specific entry conditions",
+                        "rationale": "Updated rationale with comprehensive web research validation",
+                        "entry_criteria": "Specific entry conditions based on live data",
                         "exit_criteria": "Profit target and stop loss",
-                        "live_data_validation": "How current price/volume supports YOUR trade idea"
+                        "web_research_confirmation": "How live data confirms your original research",
+                        "live_data_validation": "Specific price/volume/news data supporting your trade"
                     }}
                 ]
             }}
             
-            CRITICAL: Base your final autonomous decision on the LIVE market data for YOUR picks.
-            If the current prices don't support your original ideas, modify or remove them.
-            Only proceed with opportunities that still make sense given current market conditions.
-            These are YOUR autonomous trading decisions - make the best choices.
+            CRITICAL: 
+            - Base your final decision on comprehensive web research data
+            - Validate your original research findings against live market conditions
+            - Only proceed with opportunities where live data confirms your research
+            - If live data contradicts your research, adjust or remove the opportunity
+            - These are YOUR autonomous trading decisions validated by comprehensive web research
             """
             
             response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=4000,
                 temperature=0.3,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
                 messages=[{"role": "user", "content": prompt}]
             )
             
@@ -534,18 +587,78 @@ class ClaudeService:
             return None
     
     def _format_live_data_for_claude(self, live_data: Dict[str, Any]) -> str:
-        """Format live market data in a readable way for Claude"""
-        formatted = "LIVE MARKET DATA:\n"
+        """Format comprehensive live market data in a readable way for Claude"""
+        formatted = "COMPREHENSIVE WEB RESEARCH DATA:\n\n"
         
         for symbol, data in live_data.items():
             if "error" in data:
-                formatted += f"• {symbol}: ❌ {data['error']}\n"
+                formatted += f"• {symbol}: ❌ {data['error']}\n\n"
             else:
-                price = data.get('price', 'N/A')
-                change = data.get('change_pct', 0)
-                volume = data.get('volume', 0)
+                # Price data
+                price_data = data.get('price_data', {})
+                if price_data:
+                    price = price_data.get('current_price', 'N/A')
+                    change = price_data.get('change_pct', 0)
+                    volume = price_data.get('volume', 0)
+                    market_cap = price_data.get('market_cap', 'N/A')
+                    pe_ratio = price_data.get('pe_ratio', 'N/A')
+                    
+                    formatted += f"📊 {symbol} PRICE DATA:\n"
+                    formatted += f"   Current Price: ${price} ({change:+.2f}%)\n"
+                    formatted += f"   Volume: {volume:,}\n"
+                    formatted += f"   Market Cap: ${market_cap:,}\n" if market_cap != 'N/A' else f"   Market Cap: {market_cap}\n"
+                    formatted += f"   P/E Ratio: {pe_ratio}\n"
                 
-                formatted += f"• {symbol}: ${price:.2f} ({change:+.2f}%) | Volume: {volume:,}\n"
+                # News data
+                news = data.get('news', [])
+                if news:
+                    formatted += f"📰 {symbol} RECENT NEWS ({len(news)} articles):\n"
+                    for i, article in enumerate(news[:3], 1):  # Show top 3 news
+                        title = article.get('title', 'No title')
+                        formatted += f"   {i}. {title[:80]}{'...' if len(title) > 80 else ''}\n"
+                
+                # Earnings data
+                earnings = data.get('earnings', {})
+                if earnings:
+                    next_earnings = earnings.get('next_earnings_date', 'N/A')
+                    earnings_est = earnings.get('earnings_estimate', 'N/A')
+                    revenue_est = earnings.get('revenue_estimate', 'N/A')
+                    
+                    formatted += f"📅 {symbol} EARNINGS:\n"
+                    formatted += f"   Next Earnings: {next_earnings}\n"
+                    formatted += f"   EPS Estimate: {earnings_est}\n"
+                    formatted += f"   Revenue Estimate: {revenue_est}\n"
+                
+                # Technical analysis
+                technical = data.get('technical_analysis', {})
+                if technical:
+                    trend = technical.get('trend', 'N/A')
+                    rsi = technical.get('rsi', 'N/A')
+                    sma_20 = technical.get('sma_20', 'N/A')
+                    sma_10 = technical.get('sma_10', 'N/A')
+                    
+                    formatted += f"📈 {symbol} TECHNICAL ANALYSIS:\n"
+                    formatted += f"   Trend: {trend}\n"
+                    formatted += f"   RSI: {rsi:.1f}\n" if rsi != 'N/A' else f"   RSI: {rsi}\n"
+                    formatted += f"   SMA 20: ${sma_20:.2f}\n" if sma_20 != 'N/A' else f"   SMA 20: {sma_20}\n"
+                    formatted += f"   SMA 10: ${sma_10:.2f}\n" if sma_10 != 'N/A' else f"   SMA 10: {sma_10}\n"
+                
+                # Market sentiment
+                sentiment = data.get('market_sentiment', {})
+                if sentiment:
+                    sentiment_level = sentiment.get('sentiment', 'N/A')
+                    confidence = sentiment.get('confidence', 'N/A')
+                    
+                    formatted += f"🎯 {symbol} MARKET SENTIMENT:\n"
+                    formatted += f"   Sentiment: {sentiment_level}\n"
+                    formatted += f"   Confidence: {confidence:.1%}\n" if confidence != 'N/A' else f"   Confidence: {confidence}\n"
+                
+                # Sources
+                sources = data.get('sources', [])
+                if sources:
+                    formatted += f"🔍 Data Sources: {', '.join(sources)}\n"
+                
+                formatted += "\n" + "="*50 + "\n\n"
         
         return formatted
     
@@ -651,19 +764,27 @@ class ClaudeService:
             """
         
         try:
-            response = await self._query_claude_conversation(prompt, conversation_id)
-            decision = self._parse_position_response(response, position.id, conversation_id)
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                temperature=0.3,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            content = response.content[0].text.strip()
+            decision = self._parse_position_response(content, position.id, conversation_id)
             self.daily_query_count += 1
             
             # Update conversation thread
             self.conversation_threads[conversation_id].append({
                 "timestamp": datetime.utcnow().isoformat(),
                 "prompt": prompt,
-                "response": response,
+                "response": content,
                 "decision": decision.dict() if decision else None
             })
             
-            logger.info(f"✅ Position analysis complete. Action: {decision.action if decision else 'None'}")
+            logger.info(f"✅ Position analysis complete with web search. Action: {decision.action if decision else 'None'}")
             return decision
             
         except Exception as e:
@@ -687,7 +808,19 @@ class ClaudeService:
         context = self._prepare_evening_context(portfolio, positions, daily_trades, market_summary)
         
         prompt = f"""
-        End-of-day portfolio review and analysis.
+        🌆 END-OF-DAY PORTFOLIO REVIEW WITH WEB SEARCH ANALYSIS
+        
+        You are an expert options trader with access to comprehensive web search capabilities.
+        You MUST search multiple websites and sources to provide thorough end-of-day analysis.
+        
+        WEB SEARCH REQUIREMENTS FOR EVENING REVIEW:
+        - Search for after-hours market news and earnings announcements
+        - Research tomorrow's market catalysts and economic events
+        - Check for any breaking news affecting your positions
+        - Research sector performance and rotation trends
+        - Look for options flow data and unusual activity
+        - Search for analyst ratings changes and price target updates
+        - Research market sentiment and volatility expectations
         
         Today's Performance:
         {context['performance']}
@@ -707,9 +840,17 @@ class ClaudeService:
         - Theta: {portfolio.total_theta} (daily decay)
         - Vega: {portfolio.total_vega}
         
-        Please provide:
-        1. Performance attribution analysis (what drove P&L)
-        2. Risk assessment of current portfolio
+        WEB SEARCH ANALYSIS PROCESS:
+        1. Search for "after hours market news today"
+        2. Research each position: "[SYMBOL] after hours news earnings"
+        3. Check tomorrow's calendar: "market events tomorrow earnings"
+        4. Research sector trends: "sector rotation today market"
+        5. Look for options flow: "unusual options activity today"
+        6. Check analyst updates: "analyst ratings changes today"
+        
+        Please provide comprehensive analysis including:
+        1. Performance attribution analysis (what drove P&L) with web research context
+        2. Risk assessment of current portfolio based on market conditions
         3. Positions requiring attention tomorrow
         4. Strategy adjustments for tomorrow
         5. Market outlook for next trading session
@@ -723,14 +864,22 @@ class ClaudeService:
         """
         
         try:
-            response = await self._query_claude(prompt, "evening_review")
-            review = self._parse_evening_response(response)
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=3000,
+                temperature=0.3,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            content = response.content[0].text.strip()
+            review = self._parse_evening_response(content)
             self.daily_query_count += 1
             
             # Generate and save evening summary for dashboard
             await self._generate_and_save_evening_summary(portfolio, positions, review, market_summary)
             
-            logger.info("✅ Evening review session complete")
+            logger.info("✅ Evening review session complete with web search")
             return review
             
         except Exception as e:
@@ -794,11 +943,19 @@ class ClaudeService:
         """
         
         try:
-            response = await self._query_claude(prompt, "emergency")
-            decision = self._parse_position_response(response, position.id, position.claude_conversation_id)
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1500,
+                temperature=0.2,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            content = response.content[0].text.strip()
+            decision = self._parse_position_response(content, position.id, position.claude_conversation_id)
             self.daily_query_count += 1
             
-            logger.warning(f"🚨 Emergency analysis complete. Action: {decision.action if decision else 'None'}")
+            logger.warning(f"🚨 Emergency analysis complete with web search. Action: {decision.action if decision else 'None'}")
             return decision
             
         except Exception as e:
@@ -815,6 +972,7 @@ class ClaudeService:
                 model=self.model,
                 max_tokens=1000,
                 temperature=0.3,  # Lower temperature for more consistent decisions
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 2}],
                 messages=[
                     {
                         "role": "user",

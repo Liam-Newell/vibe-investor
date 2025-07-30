@@ -1025,3 +1025,60 @@ async def test_claude_autonomous_trading():
             "system_ready": False,
             "error_type": "Autonomous trading process error"
         } 
+
+@router.post("/test-web-search-integration")
+async def test_web_search_integration():
+    """
+    TEST ENDPOINT: Test Claude's web search tool integration
+    This verifies that Claude can use the built-in web search tool for research
+    """
+    try:
+        # Initialize Claude service
+        claude_service = ClaudeService()
+        
+        # Test web search with a simple query
+        test_prompt = """
+        🔍 WEB SEARCH TOOL TEST
+        
+        Please use your web search tool to research the following:
+        1. Current market sentiment for technology stocks
+        2. Recent earnings announcements for major tech companies
+        3. Options flow data for AAPL and TSLA
+        
+        Search multiple sources and provide a comprehensive summary of your findings.
+        Include specific data points and insights from your web research.
+        
+        Format your response as:
+        - Market Sentiment: [Your findings]
+        - Recent Earnings: [Your findings] 
+        - Options Flow: [Your findings]
+        - Sources Used: [List of sources you searched]
+        """
+        
+        response = await claude_service.client.messages.create(
+            model=claude_service.model,
+            max_tokens=2000,
+            temperature=0.3,
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+            messages=[{"role": "user", "content": test_prompt}]
+        )
+        
+        content = response.content[0].text.strip()
+        
+        return {
+            "status": "success",
+            "message": "Web search tool integration test completed",
+            "timestamp": datetime.now().isoformat(),
+            "web_search_response": content,
+            "tool_usage": "web_search_20250305 tool enabled",
+            "max_uses": 5,
+            "test_details": {
+                "purpose": "Verify Claude can use built-in web search tool",
+                "search_topics": ["Market sentiment", "Earnings announcements", "Options flow"],
+                "expected_sources": "Multiple financial websites and news sources"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Web search integration test failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Web search test failed: {str(e)}")

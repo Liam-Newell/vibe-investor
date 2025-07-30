@@ -13,7 +13,7 @@ services:
       - ./logs:/app/logs
       - ./config:/app/config
     ports:
-      - "8080:8080"  # Web dashboard
+      - "8080:8000"  # Web dashboard
     depends_on:
       - postgres
       - redis
