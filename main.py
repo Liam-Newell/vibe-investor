@@ -5,10 +5,14 @@ Main FastAPI application entry point
 """
 
 import logging
-import uvicorn
+import asyncio
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
 from src.core.config import settings
 from src.api.routes import health, portfolio, trading, claude_chat, email_test, dashboard
@@ -24,9 +28,11 @@ logger = logging.getLogger(__name__)
 
 # Create FastAPI app
 app = FastAPI(
-    title="Vibe Investor",
-    description="AI-Driven Options Trading Platform with Claude Integration",
-    version="1.0.0"
+    title="Vibe Investor API",
+    description="AI-Powered Options Trading Platform",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # Add CORS middleware
@@ -38,8 +44,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Mount static files if directory exists
+static_dir = Path("static")
+if static_dir.exists() and static_dir.is_dir():
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+else:
+    logger.warning("Static directory not found, skipping static files mounting")
 
 # Include API routes
 app.include_router(health.router, prefix="/api/v1/health", tags=["Health"])
@@ -88,7 +98,6 @@ async def shutdown_event():
 @app.get("/")
 async def root():
     """Root endpoint redirects to dashboard"""
-    from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/dashboard/")
 
 if __name__ == "__main__":
