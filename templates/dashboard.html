@@ -134,6 +134,7 @@
             font-size: 1em;
             transition: all 0.3s ease;
             margin-bottom: 20px;
+            margin-right: 10px;
         }
         
         .refresh-btn:hover {
@@ -143,6 +144,35 @@
         
         .refresh-btn:active {
             transform: translateY(0);
+        }
+        
+        .strategy-btn {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .strategy-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        
+        .strategy-btn:active {
+            transform: translateY(0);
+        }
+        
+        .strategy-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         
         .loading {
@@ -325,6 +355,16 @@
     </style>
 </head>
 <body>
+    <!-- Loading overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div style="text-align: center;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Loading dashboard...</div>
+        </div>
+    </div>
+    
+    <!-- Main content -->
+    <div class="main-content" id="mainContent">
     <div class="container">
         <div class="header">
             <h1>🤖 Vibe Investor Dashboard</h1>
@@ -332,6 +372,7 @@
                 Last Updated: <span id="lastUpdated">{{ data.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span>
             </div>
             <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Live Data</button>
+            <button class="strategy-btn" onclick="runMorningStrategy()">🌅 Run Claude Strategy</button>
         </div>
         
         <div class="status-indicators">
@@ -765,6 +806,14 @@
         // Update countdowns every second
         setInterval(updateCountdowns, 1000);
         
+        // Hide loading overlay and show content
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                document.getElementById('mainContent').classList.add('loaded');
+            }, 500);
+        });
+        
         // Auto-refresh every 60 seconds
         setInterval(() => {
             refreshData();
@@ -776,6 +825,126 @@
                 refreshData();
             }
         });
+        
+        // Function to run Claude morning strategy
+        async function runMorningStrategy() {
+            const button = document.querySelector('.strategy-btn');
+            const originalText = button.textContent;
+            
+            try {
+                button.disabled = true;
+                button.textContent = '🤖 Running Claude Analysis...';
+                
+                const response = await fetch('/api/v1/trading/run-morning-strategy', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                
+                if (result.status === 'success') {
+                    // Create and show results modal
+                    showStrategyResults(result);
+                    
+                    // Refresh dashboard data after strategy runs
+                    await refreshData();
+                    
+                } else {
+                    alert(`❌ Strategy failed: ${result.message}`);
+                }
+                
+            } catch (error) {
+                console.error('Strategy error:', error);
+                alert(`❌ Failed to run Claude strategy: ${error.message}`);
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+        
+        // Function to show strategy results
+        function showStrategyResults(result) {
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+                background: rgba(0,0,0,0.8); z-index: 1000; display: flex;
+                align-items: center; justify-content: center; padding: 20px;
+            `;
+            
+            const modalContent = document.createElement('div');
+            modalContent.style.cssText = `
+                background: white; padding: 30px; border-radius: 10px;
+                max-width: 800px; max-height: 80vh; overflow-y: auto;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            `;
+            
+            const sessionResults = result.session_results;
+            
+            modalContent.innerHTML = `
+                <h2>🌅 Claude Morning Strategy Results</h2>
+                <p><strong>Session:</strong> ${sessionResults.session_type}</p>
+                <p><strong>Time:</strong> ${new Date(sessionResults.timestamp).toLocaleString()}</p>
+                
+                <h3>📊 Market Analysis</h3>
+                <p><strong>SPY:</strong> $${sessionResults.market_data.spy_price} (${sessionResults.market_data.spy_change > 0 ? '+' : ''}${sessionResults.market_data.spy_change}%)</p>
+                <p><strong>VIX:</strong> ${sessionResults.market_data.vix_level} (${sessionResults.market_data.vix_change > 0 ? '+' : ''}${sessionResults.market_data.vix_change}%)</p>
+                <p><strong>Market Sentiment:</strong> ${sessionResults.market_data.market_sentiment}</p>
+                
+                <h3>🤖 Claude's Analysis</h3>
+                ${sessionResults.claude_analysis.market_assessment ? `
+                    <p><strong>Overall Sentiment:</strong> ${sessionResults.claude_analysis.market_assessment.overall_sentiment}</p>
+                    <p><strong>Recommended Exposure:</strong> ${sessionResults.claude_analysis.market_assessment.recommended_exposure}</p>
+                ` : ''}
+                
+                ${sessionResults.claude_analysis.cash_strategy ? `
+                    <h3>💰 Cash Strategy</h3>
+                    <p><strong>Action:</strong> ${sessionResults.claude_analysis.cash_strategy.action}</p>
+                    <p><strong>Reasoning:</strong> ${sessionResults.claude_analysis.cash_strategy.reasoning}</p>
+                ` : ''}
+                
+                <h3>🎯 Trading Opportunities</h3>
+                <p><strong>Total Generated:</strong> ${sessionResults.filtering_results.total_opportunities}</p>
+                <p><strong>Approved:</strong> ${sessionResults.filtering_results.approved_count}</p>
+                <p><strong>Rejected:</strong> ${sessionResults.filtering_results.rejected_count}</p>
+                
+                ${sessionResults.filtering_results.approved_count > 0 ? `
+                    <p><strong>Approved Symbols:</strong> ${sessionResults.filtering_results.approved_symbols.join(', ')}</p>
+                ` : ''}
+                
+                <h3>⚡ Execution Results</h3>
+                <p><strong>Positions Executed:</strong> ${sessionResults.execution_results.positions_executed}</p>
+                <p><strong>Auto-Execution:</strong> ${sessionResults.execution_results.auto_execution_enabled ? 'Enabled' : 'Disabled'}</p>
+                <p><strong>Paper Trading:</strong> ${sessionResults.execution_results.paper_trading_mode ? 'Yes (Safe Mode)' : 'No'}</p>
+                
+                <h3>📋 Next Actions</h3>
+                <ul>
+                    ${sessionResults.next_actions.map(action => `<li>${action}</li>`).join('')}
+                </ul>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button onclick="this.parentElement.parentElement.parentElement.remove()" 
+                            style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                        Close
+                    </button>
+                </div>
+            `;
+            
+            modal.appendChild(modalContent);
+            document.body.appendChild(modal);
+            
+            // Close modal when clicking outside
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
     </script>
 </body>
 </html> 

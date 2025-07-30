@@ -316,12 +316,14 @@ class TradingScheduler:
             return
         
         # Monitor positions every 30 minutes during market hours (9:30 AM - 4:00 PM ET)
+        timezone = pytz.timezone(settings.TIMEZONE)
         self.scheduler.add_job(
             self._monitor_positions,
             CronTrigger(
                 minute='0,30',
                 hour='9-16',
-                day_of_week='mon-fri'
+                day_of_week='mon-fri',
+                timezone=timezone
             ),
             id='position_monitoring',
             name='Position Monitoring and Exit Logic'
@@ -332,12 +334,14 @@ class TradingScheduler:
     async def schedule_market_data_updates(self):
         """Schedule regular market data updates"""
         # Update market data every 5 minutes during market hours
+        timezone = pytz.timezone(settings.TIMEZONE)
         self.scheduler.add_job(
             self._update_market_data,
             CronTrigger(
                 minute='*/5',
                 hour='9-16',
-                day_of_week='mon-fri'
+                day_of_week='mon-fri',
+                timezone=timezone
             ),
             id='market_data_updates',
             name='Market Data Updates'
@@ -349,7 +353,8 @@ class TradingScheduler:
             CronTrigger(
                 minute='*/15',
                 hour='9-16',
-                day_of_week='mon-fri'
+                day_of_week='mon-fri',
+                timezone=timezone
             ),
             id='position_value_updates',
             name='Position Value Updates'

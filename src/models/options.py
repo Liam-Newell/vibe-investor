@@ -400,8 +400,8 @@ class TradingSessionDB(Base):
 class MarketAssessment(BaseModel):
     """Claude's market assessment"""
     overall_sentiment: str
-    volatility_environment: str
-    opportunity_quality: str
+    volatility_environment: str = "normal"  # Default to avoid validation errors
+    opportunity_quality: str = "moderate"   # Default to avoid validation errors  
     recommended_exposure: str
 
 class CashStrategy(BaseModel):

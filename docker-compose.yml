@@ -9,6 +9,7 @@ services:
       - DATABASE_URL=postgresql://trader:${DB_PASSWORD}@postgres:5432/vibe_investor
       - REDIS_URL=redis://redis:6379
       - TZ=America/New_York
+      - CLAUDE_MORNING_TIME=09:45
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs

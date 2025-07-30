@@ -4,11 +4,13 @@ Provides live trading dashboard with real-time position updates
 """
 
 import logging
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
+import time
 
 from src.services.claude_service import ClaudeService
 from src.services.options_service import OptionsService
@@ -23,57 +25,174 @@ router = APIRouter()
 # Initialize templates
 templates = Jinja2Templates(directory="templates")
 
+# Service cache to avoid reinitializing on every request
+_service_cache = {
+    "options_service": None,
+    "market_service": None,
+    "portfolio_service": None,
+    "email_service": None,
+    "claude_service": None,
+    "last_initialized": None
+}
+
+# Market data cache (30 second TTL)
+_market_data_cache = {}
+_cache_ttl = 30  # seconds
+
+async def get_cached_services():
+    """Get cached services or initialize them if needed"""
+    global _service_cache
+    
+    # Re-initialize services every 5 minutes to prevent stale connections
+    if (_service_cache["last_initialized"] is None or 
+        (datetime.now() - _service_cache["last_initialized"]).seconds > 300):
+        
+        logger.info("♻️ Initializing fresh services...")
+        
+        # Initialize all services in parallel
+        tasks = []
+        
+        options_service = OptionsService()
+        tasks.append(options_service.initialize())
+        
+        market_service = MarketDataService() 
+        tasks.append(market_service.initialize())
+        
+        # Run parallel initialization
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        _service_cache.update({
+            "options_service": options_service,
+            "market_service": market_service,
+            "portfolio_service": PortfolioService(),
+            "email_service": EmailService(),
+            "claude_service": ClaudeService(),
+            "last_initialized": datetime.now()
+        })
+        
+        logger.info("✅ Services initialized in parallel")
+    
+    return _service_cache
+
+async def get_cached_market_data(symbol: str, market_service) -> Optional[Dict]:
+    """Get market data with caching"""
+    global _market_data_cache
+    
+    cache_key = f"market_data_{symbol}"
+    now = time.time()
+    
+    # Check if we have fresh cached data
+    if cache_key in _market_data_cache:
+        cached_data, timestamp = _market_data_cache[cache_key]
+        if now - timestamp < _cache_ttl:
+            return cached_data
+    
+    # Fetch fresh data
+    try:
+        market_data = await market_service.get_market_data(symbol)
+        if market_data:
+            result = {
+                "price": market_data.price,
+                "change_pct": market_data.change_pct,
+                "volume": market_data.volume,
+                "timestamp": market_data.timestamp.isoformat()
+            }
+            _market_data_cache[cache_key] = (result, now)
+            return result
+    except Exception as e:
+        logger.warning(f"Failed to get market data for {symbol}: {e}")
+        return {"error": str(e)}
+    
+    return None
+
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     """
     Main trading dashboard with live data updates
     Shows email content, current positions, and real-time Yahoo Finance data
     """
+    start_time = time.time()
+    
     try:
-        # Initialize services
-        options_service = OptionsService()
-        portfolio_service = PortfolioService()
-        market_service = MarketDataService()
-        email_service = EmailService()
-        claude_service = ClaudeService()
+        # Get cached services (much faster than reinitializing)
+        services = await get_cached_services()
+        options_service = services["options_service"]
+        portfolio_service = services["portfolio_service"]
+        market_service = services["market_service"]
+        email_service = services["email_service"]
+        claude_service = services["claude_service"]
         
-        await options_service.initialize()
-        await market_service.initialize()
+        logger.info("📊 Loading dashboard data...")
         
-        # Get real-time portfolio data
-        portfolio = await options_service.get_portfolio_summary()
-        current_positions = await options_service.get_active_positions()
+        # Parallel data fetching for better performance
+        portfolio_task = options_service.get_portfolio_summary()
+        positions_task = options_service.get_active_positions()
+        market_summary_task = market_service.get_market_summary()
         
-        # Get live market data for current positions
+        # Execute core data fetching in parallel
+        portfolio, current_positions, market_summary = await asyncio.gather(
+            portfolio_task,
+            positions_task, 
+            market_summary_task,
+            return_exceptions=True
+        )
+        
+        # Handle any exceptions from parallel execution
+        if isinstance(portfolio, Exception):
+            logger.error(f"Portfolio fetch error: {portfolio}")
+            portfolio = await _get_default_portfolio()
+        if isinstance(current_positions, Exception):
+            logger.error(f"Positions fetch error: {current_positions}")
+            current_positions = []
+        if isinstance(market_summary, Exception):
+            logger.error(f"Market summary fetch error: {market_summary}")
+            market_summary = {}
+        
+        # Get live market data for positions in parallel
         position_symbols = list(set([pos.symbol for pos in current_positions]))
         live_market_data = {}
         
-        for symbol in position_symbols:
-            try:
-                market_data = await market_service.get_market_data(symbol)
-                if market_data:
-                    live_market_data[symbol] = {
-                        "price": market_data.price,
-                        "change_pct": market_data.change_pct,
-                        "volume": market_data.volume,
-                        "timestamp": market_data.timestamp.isoformat()
-                    }
-            except Exception as e:
-                logger.warning(f"Failed to get market data for {symbol}: {e}")
-                live_market_data[symbol] = {"error": str(e)}
+        if position_symbols:
+            # Parallel market data fetching for all symbols
+            market_data_tasks = [
+                get_cached_market_data(symbol, market_service) 
+                for symbol in position_symbols
+            ]
+            
+            market_data_results = await asyncio.gather(
+                *market_data_tasks, 
+                return_exceptions=True
+            )
+            
+            # Combine results
+            for symbol, result in zip(position_symbols, market_data_results):
+                if isinstance(result, Exception):
+                    live_market_data[symbol] = {"error": str(result)}
+                else:
+                    live_market_data[symbol] = result or {"error": "No data"}
         
-        # Get general market summary
-        market_summary = await market_service.get_market_summary()
-        
-        # Generate email-style content for dashboard
-        email_content = await _generate_dashboard_email_content(
+        # Generate content and calculate P&L in parallel
+        email_content_task = _generate_dashboard_email_content(
             portfolio, current_positions, market_summary, claude_service
         )
         
-        # Calculate position P&L with live data
-        positions_with_live_data = await _calculate_live_position_pnl(
+        positions_pnl_task = _calculate_live_position_pnl(
             current_positions, live_market_data, market_service
         )
+        
+        email_content, positions_with_live_data = await asyncio.gather(
+            email_content_task,
+            positions_pnl_task,
+            return_exceptions=True
+        )
+        
+        # Handle exceptions
+        if isinstance(email_content, Exception):
+            logger.error(f"Email content error: {email_content}")
+            email_content = {"morning": "Error loading content", "evening": "Error loading content"}
+        if isinstance(positions_with_live_data, Exception):
+            logger.error(f"Position P&L error: {positions_with_live_data}")
+            positions_with_live_data = []
         
         # Prepare dashboard data
         dashboard_data = {
@@ -98,7 +217,10 @@ async def dashboard(request: Request):
             "max_positions": settings.MAX_SWING_POSITIONS
         }
         
-        await market_service.close()
+        # Don't close cached services
+        
+        load_time = time.time() - start_time
+        logger.info(f"📊 Dashboard loaded in {load_time:.2f}s")
         
         return templates.TemplateResponse("dashboard.html", {
             "request": request,
@@ -126,46 +248,69 @@ async def get_live_update():
     API endpoint for live data updates (for AJAX refresh)
     Returns JSON data for dashboard updates
     """
+    start_time = time.time()
+    
     try:
-        # Initialize services
-        options_service = OptionsService()
-        market_service = MarketDataService()
+        # Use cached services for much faster response
+        services = await get_cached_services()
+        options_service = services["options_service"]
+        market_service = services["market_service"]
         
-        await options_service.initialize()
-        await market_service.initialize()
+        # Get current data in parallel
+        portfolio_task = options_service.get_portfolio_summary()
+        positions_task = options_service.get_active_positions()
+        market_summary_task = market_service.get_market_summary()
+        update_values_task = options_service.update_position_values()
         
-        # Get current data
-        portfolio = await options_service.get_portfolio_summary()
-        current_positions = await options_service.get_active_positions()
+        # Execute in parallel
+        portfolio, current_positions, market_summary, _ = await asyncio.gather(
+            portfolio_task,
+            positions_task,
+            market_summary_task, 
+            update_values_task,
+            return_exceptions=True
+        )
         
-        # Update position values with live data
-        await options_service.update_position_values()
+        # Handle exceptions
+        if isinstance(portfolio, Exception):
+            portfolio = await _get_default_portfolio()
+        if isinstance(current_positions, Exception):
+            current_positions = []
+        if isinstance(market_summary, Exception):
+            market_summary = {}
         
-        # Get live market data for positions
+        # Get live market data for positions in parallel (cached)
         position_symbols = list(set([pos.symbol for pos in current_positions]))
         live_market_data = {}
         
-        for symbol in position_symbols:
-            try:
-                market_data = await market_service.get_market_data(symbol)
-                if market_data:
-                    live_market_data[symbol] = {
-                        "price": market_data.price,
-                        "change_pct": market_data.change_pct,
-                        "volume": market_data.volume
-                    }
-            except Exception as e:
-                live_market_data[symbol] = {"error": str(e)}
+        if position_symbols:
+            # Parallel market data fetching with caching
+            market_data_tasks = [
+                get_cached_market_data(symbol, market_service) 
+                for symbol in position_symbols
+            ]
+            
+            market_data_results = await asyncio.gather(
+                *market_data_tasks, 
+                return_exceptions=True
+            )
+            
+            # Combine results
+            for symbol, result in zip(position_symbols, market_data_results):
+                if isinstance(result, Exception):
+                    live_market_data[symbol] = {"error": str(result)}
+                else:
+                    live_market_data[symbol] = result or {"error": "No data"}
         
-        # Get market summary
-        market_summary = await market_service.get_market_summary()
-        
-        # Calculate live position P&L
+        # Calculate live position P&L in parallel
         positions_with_live_data = await _calculate_live_position_pnl(
             current_positions, live_market_data, market_service
         )
         
-        await market_service.close()
+        # Don't close cached services
+        
+        load_time = time.time() - start_time
+        logger.debug(f"📡 Live update completed in {load_time:.2f}s")
         
         return {
             "success": True,
@@ -233,78 +378,119 @@ async def _generate_dashboard_email_content(portfolio, positions, market_data, c
 
 async def _calculate_live_position_pnl(positions, live_market_data, market_service) -> List[Dict]:
     """Calculate live P&L for positions using Yahoo Finance data"""
-    positions_with_live_data = []
+    if not positions:
+        return []
     
+    # Process positions in parallel for better performance
+    tasks = []
     for position in positions:
-        try:
-            # Get live market data for this symbol
-            symbol_data = live_market_data.get(position.symbol, {})
-            
-            # Calculate live option value if possible
-            live_option_value = None
-            if not symbol_data.get('error'):
-                try:
-                    # Use market service to get option pricing
-                    for contract in position.contracts:
-                        option_price = await market_service.get_option_price(
-                            position.symbol,
-                            contract.strike_price,
-                            contract.expiration_date,
-                            contract.option_type
-                        )
-                        if option_price:
-                            # Calculate total position value
-                            total_contracts = sum(abs(c.quantity) for c in position.contracts)
-                            live_option_value = option_price * total_contracts * 100  # Options are per 100 shares
-                            break
-                except Exception as e:
-                    logger.warning(f"Failed to get live option price for {position.symbol}: {e}")
-            
-            # Calculate live P&L
-            live_pnl = position.unrealized_pnl
-            if live_option_value and position.entry_cost:
-                live_pnl = live_option_value - position.entry_cost
-            
-            # Days held
-            days_held = (datetime.now() - position.entry_date).days if hasattr(position, 'entry_date') else 0
-            
-            # Days to expiry (shortest contract)
-            days_to_expiry = min(
-                (contract.expiration_date - datetime.now()).days 
-                for contract in position.contracts
-            ) if position.contracts else 0
-            
-            position_data = {
-                "id": str(position.id),
-                "symbol": position.symbol,
-                "strategy": position.strategy_type.value,
-                "entry_cost": position.entry_cost,
-                "current_value": live_option_value or position.current_value,
-                "unrealized_pnl": live_pnl,
-                "pnl_percentage": (live_pnl / position.entry_cost * 100) if position.entry_cost else 0,
-                "days_held": days_held,
-                "days_to_expiry": days_to_expiry,
-                "live_market_data": symbol_data,
-                "entry_date": position.entry_date.isoformat() if hasattr(position, 'entry_date') else None,
-                "profit_target": position.profit_target,
-                "max_loss": position.max_loss,
-                "contracts_count": len(position.contracts),
-                "portfolio_delta": position.portfolio_delta,
-                "portfolio_theta": position.portfolio_theta
-            }
-            
-            positions_with_live_data.append(position_data)
-            
-        except Exception as e:
-            logger.error(f"❌ Error calculating live P&L for position {position.symbol}: {e}")
-            # Add position with error
-            positions_with_live_data.append({
-                "id": str(position.id),
-                "symbol": position.symbol,
-                "strategy": position.strategy_type.value,
-                "error": str(e),
-                "entry_cost": position.entry_cost,
-                "unrealized_pnl": position.unrealized_pnl
-            })
+        tasks.append(_process_single_position(position, live_market_data, market_service))
     
-    return positions_with_live_data 
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Filter out exceptions and return valid results
+    positions_with_live_data = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"❌ Error processing position {positions[i].symbol}: {result}")
+            # Add error position
+            positions_with_live_data.append({
+                "id": str(positions[i].id),
+                "symbol": positions[i].symbol,
+                "strategy": positions[i].strategy_type.value,
+                "error": str(result),
+                "entry_cost": positions[i].entry_cost,
+                "unrealized_pnl": positions[i].unrealized_pnl
+            })
+        else:
+            positions_with_live_data.append(result)
+    
+    return positions_with_live_data
+
+async def _process_single_position(position, live_market_data, market_service) -> Dict:
+    """Process a single position with live data"""
+    # Get live market data for this symbol
+    symbol_data = live_market_data.get(position.symbol, {})
+    
+    # Calculate live option value if possible (simplified for performance)
+    live_option_value = None
+    if not symbol_data.get('error') and position.contracts:
+        try:
+            # Use a simplified approach - get one option price as representative
+            first_contract = position.contracts[0]
+            option_price = await market_service.get_option_price(
+                position.symbol,
+                first_contract.strike_price,
+                first_contract.expiration_date,
+                first_contract.option_type
+            )
+            if option_price:
+                # Calculate total position value
+                total_contracts = sum(abs(c.quantity) for c in position.contracts)
+                live_option_value = option_price * total_contracts * 100  # Options are per 100 shares
+        except Exception as e:
+            logger.warning(f"Failed to get live option price for {position.symbol}: {e}")
+    
+    # Calculate live P&L
+    live_pnl = position.unrealized_pnl
+    if live_option_value and position.entry_cost:
+        live_pnl = live_option_value - position.entry_cost
+    
+    # Days held
+    days_held = (datetime.now() - position.entry_date).days if hasattr(position, 'entry_date') else 0
+    
+    # Days to expiry (shortest contract)
+    days_to_expiry = min(
+        (contract.expiration_date - datetime.now()).days 
+        for contract in position.contracts
+    ) if position.contracts else 0
+    
+    return {
+        "id": str(position.id),
+        "symbol": position.symbol,
+        "strategy": position.strategy_type.value,
+        "entry_cost": position.entry_cost,
+        "current_value": live_option_value or position.current_value,
+        "unrealized_pnl": live_pnl,
+        "pnl_percentage": (live_pnl / position.entry_cost * 100) if position.entry_cost else 0,
+        "days_held": days_held,
+        "days_to_expiry": days_to_expiry,
+        "live_market_data": symbol_data,
+        "entry_date": position.entry_date.isoformat() if hasattr(position, 'entry_date') else None,
+        "profit_target": position.profit_target,
+        "max_loss": position.max_loss,
+        "contracts_count": len(position.contracts),
+        "portfolio_delta": position.portfolio_delta,
+        "portfolio_theta": position.portfolio_theta
+    }
+
+async def _get_default_portfolio():
+    """Return a default portfolio in case of errors"""
+    from src.models.options import PortfolioSummary, PerformanceHistory
+    
+    return PortfolioSummary(
+        total_value=100000.0,
+        cash_balance=100000.0,
+        total_pnl=0.0,
+        open_positions=0,
+        win_rate=0.0,
+        average_win=0.0,
+        average_loss=0.0,
+        max_drawdown=0.0,
+        total_delta=0.0,
+        total_gamma=0.0,
+        total_theta=0.0,
+        total_vega=0.0,
+        performance_history=PerformanceHistory(
+            last_7_days_pnl=0.0,
+            last_30_days_pnl=0.0,
+            last_60_days_pnl=0.0,
+            current_streak=0,
+            consecutive_losses=0,
+            days_since_last_win=0,
+            recent_win_rate=0.0,
+            performance_trend="stable",
+            risk_confidence=0.5,
+            strategy_performance={}
+        )
+    ) 

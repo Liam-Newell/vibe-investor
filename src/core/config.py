@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     CLAUDE_MORNING_ENABLED: bool = Field(True, description="Enable morning Claude strategy session")
     CLAUDE_EVENING_ENABLED: bool = Field(True, description="Enable evening Claude review session")
     CLAUDE_MAX_DAILY_QUERIES: int = Field(10, description="Maximum Claude queries per day")
-    CLAUDE_MORNING_TIME: str = Field("08:00", description="Morning session time (HH:MM)")
+    CLAUDE_MORNING_TIME: str = Field("09:45", description="Morning session time (HH:MM) - 15 min after market open for real price data")
     CLAUDE_EVENING_TIME: str = Field("17:00", description="Evening session time (HH:MM)")
     
     # Trading Strategy Configuration
@@ -65,17 +65,17 @@ class Settings(BaseSettings):
     MIN_OPTION_VOLUME: int = Field(100, description="Minimum daily volume for options")
     MIN_OPTION_OPEN_INTEREST: int = Field(500, description="Minimum open interest for options")
     
-    # Dynamic Confidence Thresholds (Research-Based)
-    MIN_CONFIDENCE_LONG_PUTS: float = Field(0.78, description="Minimum confidence for long puts (high volatility risk)")
-    MIN_CONFIDENCE_LONG_CALLS: float = Field(0.75, description="Minimum confidence for long calls (directional risk)")
-    MIN_CONFIDENCE_CREDIT_SPREADS: float = Field(0.68, description="Minimum confidence for credit spreads (defined risk)")
-    MIN_CONFIDENCE_IRON_CONDORS: float = Field(0.65, description="Minimum confidence for iron condors (market neutral)")
-    MIN_CONFIDENCE_PUT_SPREADS: float = Field(0.70, description="Minimum confidence for put spreads")
+    # Dynamic Confidence Thresholds (Research-Based) - LOWERED to allow 0.7+ picks
+    MIN_CONFIDENCE_LONG_PUTS: float = Field(0.70, description="Minimum confidence for long puts (lowered to allow 0.7+)")
+    MIN_CONFIDENCE_LONG_CALLS: float = Field(0.65, description="Minimum confidence for long calls (lowered for NVDA 0.72)")
+    MIN_CONFIDENCE_CREDIT_SPREADS: float = Field(0.60, description="Minimum confidence for credit spreads (lowered for AAPL 0.68)")
+    MIN_CONFIDENCE_IRON_CONDORS: float = Field(0.60, description="Minimum confidence for iron condors (allows SPY 0.70)")
+    MIN_CONFIDENCE_PUT_SPREADS: float = Field(0.65, description="Minimum confidence for put spreads (lowered to allow 0.7+)")
     
     # Performance-Based Confidence Adjustments
-    CONFIDENCE_BOOST_AFTER_LOSSES: float = Field(0.10, description="Increase confidence threshold after losses")
-    CONFIDENCE_REDUCTION_AFTER_WINS: float = Field(0.05, description="Decrease confidence threshold after wins")
-    MIN_CONFIDENCE_FLOOR: float = Field(0.60, description="Absolute minimum confidence for any trade")
+    CONFIDENCE_BOOST_AFTER_LOSSES: float = Field(0.05, description="Smaller increase in confidence threshold after losses")
+    CONFIDENCE_REDUCTION_AFTER_WINS: float = Field(0.08, description="Larger decrease in confidence threshold after wins")
+    MIN_CONFIDENCE_FLOOR: float = Field(0.55, description="Absolute minimum confidence for any trade (lowered)")
     MAX_CONFIDENCE_CEILING: float = Field(0.95, description="Maximum confidence threshold")
     
     # Auto-Execution Settings

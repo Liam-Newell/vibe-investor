@@ -12,8 +12,8 @@ from src.services.claude_service import ClaudeService
 from src.models.options import PortfolioSummary, PerformanceHistory
 from src.services.options_service import OptionsService
 from src.services.portfolio_service import PortfolioService
-from src.core.config import settings
 from src.services.market_data_service import MarketDataService
+from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -1082,3 +1082,229 @@ async def test_web_search_integration():
     except Exception as e:
         logger.error(f"❌ Web search integration test failed: {e}")
         raise HTTPException(status_code=500, detail=f"Web search test failed: {str(e)}")
+
+@router.post("/run-morning-strategy")
+async def run_morning_strategy():
+    """
+    🌅 MANUAL MORNING STRATEGY SESSION
+    
+    Run Claude's full morning strategy session manually to pick stocks ad-hoc.
+    This executes the same logic as the scheduled 8:00 AM session:
+    
+    1. Fetches live market data
+    2. Claude analyzes current conditions and picks stocks/options
+    3. Applies dynamic confidence filtering
+    4. Optionally executes trades (if AUTO_EXECUTE_TRADES is enabled)
+    5. Returns detailed analysis and recommendations
+    """
+    try:
+        # Initialize services
+        options_service = OptionsService()
+        portfolio_service = PortfolioService()
+        claude_service = ClaudeService()
+        market_service = MarketDataService()
+        
+        await options_service.initialize()
+        
+        logger.info("🌅 Starting MANUAL morning strategy session with live market analysis")
+        
+        # Get current portfolio and positions (real data)
+        portfolio = await options_service.get_portfolio_summary()
+        positions = await options_service.get_active_positions()
+        
+        # Get LIVE market data (no mock data)
+        logger.info("📊 Fetching live market data...")
+        market_summary = await market_service.get_market_summary()
+        
+        # Get earnings calendar (live data when available)
+        earnings_calendar = await market_service.get_earnings_calendar(days_ahead=7)
+        
+        # Validate market data
+        if market_summary.get('error'):
+            return {
+                "status": "error",
+                "message": f"Failed to get live market data: {market_summary.get('error')}",
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        logger.info(f"📊 Live market data: SPY ${market_summary.get('spy_price')}, VIX {market_summary.get('vix')}, Sentiment: {market_summary.get('market_sentiment')}")
+        
+        # Run Claude morning session with LIVE data - Claude makes ALL decisions
+        logger.info("🤖 Running Claude analysis on live market data...")
+        strategy_response = await claude_service.morning_strategy_session(
+            portfolio=portfolio, 
+            market_data=market_summary,  # Live market data
+            earnings_calendar=earnings_calendar,  # Live earnings data
+            current_positions=positions  # Real positions
+        )
+        
+        opportunities = strategy_response.opportunities if hasattr(strategy_response, 'opportunities') else []
+        logger.info(f"🎯 Claude analyzed live market and generated {len(opportunities)} opportunities")
+        
+        # Extract Claude's analysis
+        market_assessment = None
+        cash_strategy = None
+        
+        if hasattr(strategy_response, 'market_assessment'):
+            market_assessment = {
+                "overall_sentiment": strategy_response.market_assessment.overall_sentiment,
+                "vix_analysis": strategy_response.market_assessment.vix_analysis if hasattr(strategy_response.market_assessment, 'vix_analysis') else "No VIX analysis",
+                "sector_analysis": strategy_response.market_assessment.sector_analysis if hasattr(strategy_response.market_assessment, 'sector_analysis') else "No sector analysis",
+                "recommended_exposure": strategy_response.market_assessment.recommended_exposure if hasattr(strategy_response.market_assessment, 'recommended_exposure') else "Unknown"
+            }
+        
+        if hasattr(strategy_response, 'cash_strategy'):
+            cash_strategy = {
+                "action": strategy_response.cash_strategy.action,
+                "reasoning": strategy_response.cash_strategy.reasoning,
+                "target_cash_percentage": strategy_response.cash_strategy.target_cash_percentage if hasattr(strategy_response.cash_strategy, 'target_cash_percentage') else None,
+                "urgency": strategy_response.cash_strategy.urgency if hasattr(strategy_response.cash_strategy, 'urgency') else None
+            }
+        
+        # Format opportunities for response
+        formatted_opportunities = []
+        for opp in opportunities:
+            formatted_opportunities.append({
+                "symbol": opp.symbol,
+                "strategy_type": opp.strategy_type,
+                "confidence": opp.confidence,
+                "target_return": opp.target_return,
+                "max_risk": opp.max_risk,
+                "time_horizon": opp.time_horizon,
+                "rationale": opp.rationale,
+                "risk_assessment": opp.risk_assessment if hasattr(opp, 'risk_assessment') else "No assessment",
+                "contracts": opp.contracts if hasattr(opp, 'contracts') else [],
+                "priority": opp.priority if hasattr(opp, 'priority') else "Normal"
+            })
+        
+        # Filter opportunities using dynamic confidence thresholds (based on live performance)
+        approved_opportunities = []
+        rejected_opportunities = []
+        
+        for opportunity in opportunities:
+            # Convert opportunity to dict format if needed
+            opp_dict = opportunity.dict() if hasattr(opportunity, 'dict') else opportunity
+            
+            # Check if opportunity meets dynamic thresholds based on REAL performance
+            if portfolio_service.should_execute_opportunity(opp_dict, portfolio):
+                approved_opportunities.append(opp_dict)
+                logger.info(f"✅ Approved by dynamic filter: {opp_dict.get('symbol')} {opp_dict.get('strategy_type')} ({opp_dict.get('confidence', 0):.1%})")
+            else:
+                rejected_opportunities.append(opp_dict)
+                logger.info(f"❌ Rejected by dynamic filter: {opp_dict.get('symbol')} {opp_dict.get('strategy_type')} ({opp_dict.get('confidence', 0):.1%})")
+        
+        # Execute approved opportunities automatically (REAL trades in paper account) if enabled
+        executed_position_ids = []
+        execution_results = []
+        
+        if approved_opportunities and settings.AUTO_EXECUTE_TRADES:
+            logger.info(f"🎯 Executing {len(approved_opportunities)} Claude-approved opportunities based on live analysis...")
+            executed_position_ids = await options_service.execute_approved_opportunities(
+                approved_opportunities, portfolio
+            )
+            
+            if executed_position_ids:
+                logger.info(f"🎯 ✅ Successfully executed {len(executed_position_ids)} positions based on Claude's live market analysis")
+                
+                # Get details of executed positions
+                for pos_id in executed_position_ids:
+                    position = options_service.get_position(pos_id)
+                    if position:
+                        execution_results.append({
+                            "id": str(position.id),
+                            "symbol": position.symbol,
+                            "strategy": position.strategy_type.value,
+                            "entry_cost": position.entry_cost,
+                            "contracts_count": len(position.contracts),
+                            "profit_target": position.profit_target,
+                            "max_loss": position.max_loss
+                        })
+                
+                # Update portfolio after executions (real portfolio tracking)
+                portfolio = await options_service.get_portfolio_summary()
+                positions = await options_service.get_active_positions()
+            else:
+                logger.info("📭 No positions were executed (all filtered out or failed)")
+        elif not settings.AUTO_EXECUTE_TRADES:
+            logger.info("🔒 Auto-execution disabled - Claude's opportunities identified but not executed")
+        else:
+            logger.info("📭 No opportunities met the dynamic confidence thresholds based on performance")
+        
+        logger.info(f"🌅 Manual morning session complete. Claude opportunities: {len(opportunities)}, Approved: {len(approved_opportunities)}, Executed: {len(executed_position_ids)}")
+        
+        # Prepare comprehensive response
+        session_results = {
+            "timestamp": datetime.now().isoformat(),
+            "session_type": "Manual Morning Strategy Session",
+            "market_data": {
+                "spy_price": market_summary.get('spy_price'),
+                "spy_change": market_summary.get('spy_change'),
+                "vix_level": market_summary.get('vix'),
+                "vix_change": market_summary.get('vix_change'),
+                "market_sentiment": market_summary.get('market_sentiment'),
+                "volatility_trend": market_summary.get('volatility_trend'),
+                "market_hours": market_summary.get('market_hours'),
+                "data_source": market_summary.get('data_source', 'Live Yahoo Finance')
+            },
+            "portfolio_status": {
+                "total_value": portfolio.total_value,
+                "cash_balance": portfolio.cash_balance,
+                "open_positions": portfolio.open_positions,
+                "current_streak": portfolio.performance_history.current_streak,
+                "recent_win_rate": portfolio.performance_history.recent_win_rate,
+                "risk_level": portfolio.get_adaptive_risk_level()
+            },
+            "claude_analysis": {
+                "market_assessment": market_assessment,
+                "cash_strategy": cash_strategy,
+                "opportunities_generated": len(opportunities),
+                "opportunities": formatted_opportunities
+            },
+            "filtering_results": {
+                "total_opportunities": len(opportunities),
+                "approved_count": len(approved_opportunities),
+                "rejected_count": len(rejected_opportunities),
+                "approved_symbols": [opp.get('symbol') for opp in approved_opportunities],
+                "rejected_symbols": [opp.get('symbol') for opp in rejected_opportunities],
+                "filtering_criteria": "Dynamic confidence thresholds based on portfolio performance"
+            },
+            "execution_results": {
+                "auto_execution_enabled": settings.AUTO_EXECUTE_TRADES,
+                "positions_executed": len(executed_position_ids),
+                "execution_details": execution_results,
+                "paper_trading_mode": settings.PAPER_TRADING_ONLY
+            },
+            "next_actions": [
+                f"📊 Monitor {len(executed_position_ids)} new positions" if executed_position_ids else "🔍 No new positions to monitor",
+                "⏰ Positions will be monitored every 30 minutes during market hours",
+                "📈 Live P&L updates available on dashboard",
+                "🌆 Evening review session will assess today's performance",
+                "🌅 Next scheduled morning session: Tomorrow at 8:00 AM EDT"
+            ]
+        }
+        
+        # Determine response message based on results
+        if executed_position_ids:
+            message = f"✅ Morning strategy complete! Claude analyzed live market conditions and executed {len(executed_position_ids)} positions based on {market_assessment['overall_sentiment'] if market_assessment else 'market analysis'}"
+        elif approved_opportunities:
+            message = f"🔒 Morning strategy complete! Claude identified {len(approved_opportunities)} opportunities but auto-execution is disabled. Enable AUTO_EXECUTE_TRADES to execute automatically."
+        elif opportunities:
+            message = f"⚠️ Morning strategy complete! Claude identified {len(opportunities)} opportunities but all were rejected by risk management filters based on current portfolio performance."
+        else:
+            message = f"💰 Morning strategy complete! Claude analyzed live market conditions and recommends holding cash based on current market sentiment: {market_assessment['overall_sentiment'] if market_assessment else 'cautious approach'}"
+        
+        return {
+            "status": "success",
+            "message": message,
+            "session_results": session_results,
+            "deployment_note": "🤖 This is the same logic that runs automatically every morning at 8:00 AM EDT"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Manual morning strategy session failed: {e}")
+        return {
+            "status": "error",
+            "message": f"Manual morning strategy session failed: {str(e)}",
+            "timestamp": datetime.now().isoformat(),
+            "suggestion": "Check logs for detailed error information"
+        }
