@@ -26,39 +26,6 @@ from claude_summaries import claude_summary_manager
 
 logger = logging.getLogger(__name__)
 
-class MarketAssessment(BaseModel):
-    """Claude's market assessment"""
-    overall_sentiment: str
-    volatility_environment: str
-    opportunity_quality: str
-    recommended_exposure: str
-
-class CashStrategy(BaseModel):
-    """Claude's cash management strategy"""
-    action: str
-    reasoning: str
-    target_cash_percentage: float
-    urgency: str
-
-class EnhancedOptionsOpportunity(BaseModel):
-    """Enhanced options opportunity with priority"""
-    symbol: str
-    strategy_type: str
-    contracts: List[Dict[str, Any]]
-    rationale: str
-    confidence: float
-    risk_assessment: str
-    target_return: float
-    max_risk: float
-    time_horizon: int
-    priority: str = "medium"
-
-class MorningStrategyResponse(BaseModel):
-    """Complete morning strategy response from Claude"""
-    market_assessment: MarketAssessment
-    cash_strategy: CashStrategy
-    opportunities: List[EnhancedOptionsOpportunity]
-
 class ClaudeResponse(BaseModel):
     """Structured Claude response for options analysis"""
     action: ClaudeActionType
