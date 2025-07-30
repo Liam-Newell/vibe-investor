@@ -18,6 +18,7 @@ import uvicorn
 
 # Import our position database
 from positions_db import db, Position
+from claude_summaries import claude_summary_manager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -206,7 +207,8 @@ async def dashboard(request: Request):
             "auto_trading_enabled": True,
             "paper_trading": True,
             "max_positions": portfolio_summary['max_positions'],
-            "held_symbols": held_symbols
+            "held_symbols": held_symbols,
+            "claude_summary": claude_summary_manager.get_summary_with_metadata()
         }
         
         return templates.TemplateResponse("dashboard.html", {
@@ -252,6 +254,7 @@ async def get_live_update():
                 },
                 "positions": [],
                 "held_symbols": held_symbols,
+                "claude_summary": claude_summary_manager.get_summary_with_metadata(),
                 "message": "No positions to update"
             }
         
@@ -327,7 +330,8 @@ async def get_live_update():
             },
             "positions": updated_positions,
             "held_symbols": held_symbols,
-            "live_market_data": live_market_data
+            "live_market_data": live_market_data,
+            "claude_summary": claude_summary_manager.get_summary_with_metadata()
         }
         
     except Exception as e:
@@ -657,14 +661,14 @@ async def test_claude_full_integration():
 
 if __name__ == "__main__":
     print("🚀 Starting Vibe Investor Dashboard with Real Position Tracking...")
-    print("📊 Dashboard: http://localhost:8000/")
-    print("🤖 Claude Test: http://localhost:8000/test-claude")
+    print("📊 Dashboard: http://localhost:8080/")
+    print("🤖 Claude Test: http://localhost:8080/test-claude")
     print("📋 Add Position: POST /api/add-position")
     print("🗄️ Database ready for position persistence!")
     
     uvicorn.run(
         "simple_dashboard:app",
         host="0.0.0.0",
-        port=8000,
+        port=8080,  # Changed from 8000 to 8080 to match docker-compose
         reload=True
     ) 

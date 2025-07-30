@@ -449,10 +449,10 @@ The system is production-ready for paper trading with complete autonomous functi
 docker-compose up -d
 
 # Access dashboard  
-open http://localhost:8000/
+open http://localhost:8080/
 
 # View live trading positions
-curl http://localhost:8000/api/live-update
+curl http://localhost:8080/api/live-update
 ```
 
 **What Happens When You Deploy:**

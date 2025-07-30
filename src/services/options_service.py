@@ -325,14 +325,14 @@ class OptionsService:
         
         try:
             # Add to in-memory storage
-            self.positions[position.id] = position
-            self.cash_balance -= position.entry_cost
-            
+        self.positions[position.id] = position
+        self.cash_balance -= position.entry_cost
+        
             # Save to database
             await self._save_position_to_db(position)
             
             logger.info(f"📝 Paper trade: Created {position.symbol} position for ${position.entry_cost:,.0f}")
-            return True
+        return True
             
         except Exception as e:
             logger.error(f"❌ Failed to create position: {e}")
@@ -348,20 +348,20 @@ class OptionsService:
             return False
         
         try:
-            position = self.positions[position_id]
-            position.status = "closed"
+        position = self.positions[position_id]
+        position.status = "closed"
             position.exit_date = datetime.now()
-            position.current_value = exit_price * position.quantity
-            position.realized_pnl = position.current_value - position.entry_cost
+        position.current_value = exit_price * position.quantity
+        position.realized_pnl = position.current_value - position.entry_cost
             position.unrealized_pnl = 0.0  # No longer unrealized
-            
-            self.cash_balance += position.current_value
+        
+        self.cash_balance += position.current_value
             
             # Save to database
             await self._save_position_to_db(position)
-            
-            logger.info(f"📝 Paper trade: Closed {position.symbol} position. P&L: ${position.realized_pnl:.2f}")
-            return True
+        
+        logger.info(f"📝 Paper trade: Closed {position.symbol} position. P&L: ${position.realized_pnl:.2f}")
+        return True
             
         except Exception as e:
             logger.error(f"❌ Failed to close position: {e}")
@@ -372,8 +372,8 @@ class OptionsService:
         try:
             updated_count = 0
             
-            for position in self.positions.values():
-                if position.status == "open":
+        for position in self.positions.values():
+            if position.status == "open":
                     # Get real market data for the underlying symbol
                     new_value = await self._calculate_position_value(position)
                     
@@ -431,7 +431,7 @@ class OptionsService:
     
     def get_position(self, position_id: UUID) -> Optional[OptionsPosition]:
         """Get a specific position"""
-        return self.positions.get(position_id)
+        return self.positions.get(position_id) 
     
     async def create_position_from_opportunity(self, opportunity: Dict[str, Any], portfolio: PortfolioSummary) -> Optional[OptionsPosition]:
         """

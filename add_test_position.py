@@ -83,15 +83,16 @@ def main():
     print(f"\n🎉 Successfully added {added_count}/{len(test_positions)} test positions!")
     
     # Show updated portfolio
-    portfolio = db.get_portfolio_summary()
+    updated_portfolio = db.get_portfolio_summary()
     positions = db.get_all_positions()
     
-    print("\n📊 Updated Portfolio:")
-    print(f"   Total Value: ${portfolio['total_value']:,.0f}")
-    print(f"   Open Positions: {portfolio['open_positions']}")
-    print(f"   Held Symbols: {db.get_held_symbols()}")
+    print(f"📊 Updated Portfolio Summary:")
+    print(f"   Total Value: ${updated_portfolio['total_value']:,.0f}")
+    print(f"   Cash Balance: ${updated_portfolio['cash_balance']:,.0f}")
+    print(f"   Open Positions: {updated_portfolio['open_positions']}")
+    print(f"   Total P&L: ${updated_portfolio['total_pnl']:,.0f}")
     
-    print("\n🌐 Dashboard: http://localhost:8000/")
+    print("\n🌐 Dashboard: http://localhost:8080/")
     print("🔄 Refresh the dashboard to see your test positions!")
 
 if __name__ == "__main__":

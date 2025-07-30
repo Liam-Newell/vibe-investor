@@ -27,7 +27,7 @@ async def test_claude_integration():
             # Test 1: Verify refresh functionality works
             print("📊 Step 1: Testing refresh functionality...")
             try:
-                async with session.get("http://localhost:8000/api/live-update", timeout=10) as response:
+                async with session.get("http://localhost:8080/api/live-update", timeout=10) as response:
                     if response.status == 200:
                         data = await response.json()
                         if data.get('success'):
@@ -47,7 +47,7 @@ async def test_claude_integration():
             # Test 2: Claude Full Integration Test
             print("🤖 Step 2: Testing Claude's full position control...")
             try:
-                async with session.post("http://localhost:8000/api/test-claude-full-integration", timeout=30) as response:
+                async with session.post("http://localhost:8080/api/test-claude-full-integration", timeout=30) as response:
                     if response.status == 200:
                         data = await response.json()
                         
@@ -128,7 +128,7 @@ async def verify_dashboard_update():
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("http://localhost:8000/api/live-update") as response:
+            async with session.get("http://localhost:8080/api/live-update") as response:
                 if response.status == 200:
                     data = await response.json()
                     
@@ -151,7 +151,7 @@ async def verify_dashboard_update():
                                 pnl_pct = pos.get('pnl_percentage', 0)
                                 print(f"   • {symbol}: ${pnl:+,.0f} ({pnl_pct:+.1f}%)")
                         
-                        print(f"\n🌐 Dashboard URL: http://localhost:8000/")
+                        print(f"\n🌐 Dashboard URL: http://localhost:8080/")
                         print("🔄 Click 'Refresh Live Data' to see real-time updates")
                         
                         return True
@@ -211,7 +211,7 @@ async def main():
         print("🤖 Claude has complete control over position parameters")
         print("🗄️ Database persistence working correctly") 
         print("📊 Dashboard displaying real-time data")
-        print("🌐 Open http://localhost:8000/ to see your positions!")
+        print("🌐 Open http://localhost:8080/ to see your positions!")
         
         return True
     else:

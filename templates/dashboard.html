@@ -260,6 +260,23 @@
             color: #004085;
         }
         
+        .claude-summary {
+            color: #2c3e50;
+            background: #ecf0f1;
+            border-left: 4px solid #3498db;
+            padding: 12px;
+            margin: 15px 0;
+            border-radius: 8px;
+            font-size: 0.9em;
+            line-height: 1.4;
+            font-weight: 500;
+            transition: background-color 0.3s ease;
+        }
+        
+        .claude-summary:hover {
+            background: #d5dbdb;
+        }
+        
         @keyframes pulse {
             0% { transform: scale(1); }
             50% { transform: scale(1.05); }
@@ -332,9 +349,12 @@
         <!-- Live Countdown Timers -->
         <div class="countdown-section">
             <div class="countdown-card">
-                <h3>🤖 Next Claude Analysis</h3>
+                <h3>🤖 Claude Analysis</h3>
                 <div class="countdown-timer" id="claudeCountdown">Calculating...</div>
-                <div class="countdown-label">Morning Strategy Session (8:00 AM EST)</div>
+                <div class="countdown-label">Next Session: 8:00 AM EST</div>
+                <div class="claude-summary" id="claudeSummary" style="margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 8px; font-size: 0.9em; line-height: 1.4;">
+                    {{ data.claude_summary.summary if data.claude_summary else "🤖 Autonomous trading system ready - awaiting first Claude session" }}
+                </div>
                 <div class="countdown-status claude-ready" id="claudeStatus">System Ready</div>
             </div>
             <div class="countdown-card">
@@ -547,6 +567,11 @@
                 if (data.success) {
                     // Update timestamp
                     document.getElementById('lastUpdated').textContent = new Date(data.timestamp).toLocaleString();
+                    
+                    // Update Claude summary if available
+                    if (data.claude_summary && data.claude_summary.summary) {
+                        document.getElementById('claudeSummary').textContent = data.claude_summary.summary;
+                    }
                     
                     // For now, just reload the page to show updated data
                     // In the future, we could update specific elements

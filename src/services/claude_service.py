@@ -6,6 +6,7 @@ Handles individual position conversations and strategic analysis
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, date
 from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID
@@ -17,8 +18,11 @@ from pydantic import BaseModel
 from src.core.config import settings
 from src.models.options import (
     OptionsPosition, ClaudeDecision, ClaudeActionType, OptionContract,
-    VolatilityData, GreeksData, PortfolioSummary
+    VolatilityData, GreeksData, PortfolioSummary, EnhancedOptionsOpportunity,
+    MorningStrategyResponse, MarketAssessment, CashStrategy
 )
+from src.utils.web_search import search_stock_data
+from claude_summaries import claude_summary_manager
 
 logger = logging.getLogger(__name__)
 
@@ -220,13 +224,34 @@ class ClaudeService:
                     if hasattr(assessment, 'key_observations'):
                         logger.info(f"📊 Claude's key observations: {assessment.key_observations}")
                 
+                # Generate and save morning summary for dashboard
+                await self._generate_and_save_morning_summary(final_strategy_response, portfolio, market_data)
+                
                 return final_strategy_response
             else:
                 logger.warning("⚠️ Claude changed mind after reviewing live data - no final picks")
+                # Save fallback summary
+                try:
+                    claude_summary_manager.save_morning_summary(
+                        summary="No trades today - Claude reviewed live data and decided to hold cash",
+                        opportunities_count=0,
+                        market_analysis="Cautious approach after live data review"
+                    )
+                except:
+                    pass
                 return self._create_fallback_response()
                 
         except Exception as e:
             logger.error(f"❌ Claude autonomous trading process failed: {e}")
+            # Save fallback summary for error case
+            try:
+                claude_summary_manager.save_morning_summary(
+                    summary="Morning session error - system will retry next morning",
+                    opportunities_count=0,
+                    market_analysis="Technical error during analysis"
+                )
+            except:
+                pass
             return self._create_fallback_response()
     
     async def _get_claude_initial_picks(self, portfolio: PortfolioSummary, current_positions: List) -> List[Dict[str, Any]]:
@@ -735,11 +760,23 @@ class ClaudeService:
             review = self._parse_evening_response(response)
             self.daily_query_count += 1
             
+            # Generate and save evening summary for dashboard
+            await self._generate_and_save_evening_summary(portfolio, positions, review, market_summary)
+            
             logger.info("✅ Evening review session complete")
             return review
             
         except Exception as e:
             logger.error(f"❌ Evening review session failed: {e}")
+            # Save fallback summary for error case
+            try:
+                claude_summary_manager.save_evening_summary(
+                    summary="Evening session error - performance data may be incomplete",
+                    portfolio_performance="Unable to analyze due to error",
+                    next_day_outlook="Will retry analysis tomorrow morning"
+                )
+            except:
+                pass
             return {}
     
     async def emergency_analysis(self, 
@@ -1246,3 +1283,78 @@ class ClaudeService:
         except Exception as e:
             logger.error(f"❌ Error parsing live morning response: {e}")
             return None 
+
+    async def _generate_and_save_morning_summary(self, strategy_response: MorningStrategyResponse, portfolio: PortfolioSummary, market_data: Dict[str, Any]):
+        """Generate and save a summary of the morning strategy session for dashboard display"""
+        try:
+            # Create a concise summary for dashboard display
+            opportunities_count = len(strategy_response.opportunities)
+            market_sentiment = strategy_response.market_assessment.overall_sentiment
+            cash_action = strategy_response.cash_strategy.action
+            
+            # Generate a brief summary
+            if opportunities_count == 0:
+                summary = f"No trades today - {cash_action.lower()}. Market: {market_sentiment}"
+            elif opportunities_count == 1:
+                summary = f"Found 1 opportunity - {cash_action.lower()}. Market: {market_sentiment}"
+            else:
+                summary = f"Found {opportunities_count} opportunities - {cash_action.lower()}. Market: {market_sentiment}"
+            
+            # Save the summary using the claude_summary_manager
+            claude_summary_manager.save_morning_summary(
+                summary=summary,
+                opportunities_count=opportunities_count,
+                market_analysis=f"{market_sentiment} - {strategy_response.market_assessment.volatility_environment}"
+            )
+            
+            logger.info(f"💾 Saved morning summary: {summary}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to generate morning summary: {e}")
+            # Save a fallback summary
+            try:
+                claude_summary_manager.save_morning_summary(
+                    summary="Morning analysis completed - check positions for details",
+                    opportunities_count=0,
+                    market_analysis="Analysis completed"
+                )
+            except:
+                pass 
+
+    async def _generate_and_save_evening_summary(self, portfolio: PortfolioSummary, positions: List[OptionsPosition], review: Dict[str, Any], market_summary: Dict[str, Any]):
+        """Generate and save a summary of the evening review session for dashboard display"""
+        try:
+            # Extract key information from the review
+            total_pnl = portfolio.total_pnl
+            win_rate = portfolio.win_rate
+            open_positions = portfolio.open_positions
+            market_sentiment = market_summary.get('market_sentiment', 'Unknown')
+            volatility_trend = market_summary.get('volatility_trend', 'Unknown')
+            market_hours = market_summary.get('market_hours', 'Unknown')
+
+            # Generate a brief summary
+            if open_positions == 0:
+                summary = f"No open positions. Market: {market_sentiment}. Volatility: {volatility_trend}. Hours: {market_hours}"
+            else:
+                summary = f"Open positions: {open_positions}. Total P&L: ${total_pnl:,.0f}. Win Rate: {win_rate:.1%}. Market: {market_sentiment}. Volatility: {volatility_trend}. Hours: {market_hours}"
+            
+            # Save the summary using the claude_summary_manager
+            claude_summary_manager.save_evening_summary(
+                summary=summary,
+                portfolio_performance=f"Total P&L: ${total_pnl:,.0f}, Win Rate: {win_rate:.1%}",
+                next_day_outlook=f"Market: {market_sentiment}. Volatility: {volatility_trend}. Hours: {market_hours}"
+            )
+            
+            logger.info(f"💾 Saved evening summary: {summary}")
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to generate evening summary: {e}")
+            # Save a fallback summary
+            try:
+                claude_summary_manager.save_evening_summary(
+                    summary="Evening session error - performance data may be incomplete",
+                    portfolio_performance="Unable to analyze due to error",
+                    next_day_outlook="Will retry analysis tomorrow morning"
+                )
+            except:
+                pass 
