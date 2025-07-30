@@ -26,11 +26,13 @@ class PortfolioService:
         self.base_confidence_thresholds = {
             StrategyType.LONG_PUT: settings.MIN_CONFIDENCE_LONG_PUTS,
             StrategyType.LONG_CALL: settings.MIN_CONFIDENCE_LONG_CALLS,
-            StrategyType.CREDIT_SPREAD: settings.MIN_CONFIDENCE_CREDIT_SPREADS,
+            StrategyType.CALL_SPREAD: settings.MIN_CONFIDENCE_CREDIT_SPREADS,
             StrategyType.PUT_SPREAD: settings.MIN_CONFIDENCE_PUT_SPREADS,
             StrategyType.IRON_CONDOR: settings.MIN_CONFIDENCE_IRON_CONDORS,
-            StrategyType.SHORT_PUT: settings.MIN_CONFIDENCE_CREDIT_SPREADS,  # Similar to credit spreads
-            StrategyType.SHORT_CALL: settings.MIN_CONFIDENCE_CREDIT_SPREADS,
+            StrategyType.STRADDLE: settings.MIN_CONFIDENCE_CREDIT_SPREADS,  # Similar to credit spreads
+            StrategyType.STRANGLE: settings.MIN_CONFIDENCE_CREDIT_SPREADS,
+            StrategyType.COVERED_CALL: settings.MIN_CONFIDENCE_CREDIT_SPREADS,
+            StrategyType.PROTECTIVE_PUT: settings.MIN_CONFIDENCE_LONG_PUTS,
         }
     
     def calculate_dynamic_confidence_threshold(self, strategy_type: StrategyType, portfolio: PortfolioSummary) -> float:

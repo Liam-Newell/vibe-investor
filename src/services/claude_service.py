@@ -364,7 +364,7 @@ class ClaudeService:
             return False
         
         # Validate strategy type
-        valid_strategies = ['long_call', 'long_put', 'credit_spread', 'iron_condor', 'put_spread', 'short_call', 'short_put']
+        valid_strategies = ['long_call', 'long_put', 'call_spread', 'put_spread', 'iron_condor', 'straddle', 'strangle', 'covered_call', 'protective_put']
         if rec['strategy_type'] not in valid_strategies:
             logger.warning(f"Invalid strategy type: {rec.get('strategy_type')}")
             return False

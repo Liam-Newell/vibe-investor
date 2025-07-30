@@ -550,7 +550,7 @@ class OptionsService:
             # Calculate contract count based on position size (assuming ~$1000 per contract)
             base_contract_count = max(1, int(position_size / 1000))
             
-            if strategy_type in [StrategyType.LONG_CALL, StrategyType.SHORT_CALL]:
+            if strategy_type in [StrategyType.LONG_CALL]:
                 # Find appropriate call strike from real option chain
                 call_options = option_chain.get('calls', [])
                 
@@ -573,7 +573,7 @@ class OptionsService:
                     quantity=base_contract_count if strategy_type == StrategyType.LONG_CALL else -base_contract_count
                 ))
                 
-            elif strategy_type in [StrategyType.LONG_PUT, StrategyType.SHORT_PUT]:
+            elif strategy_type in [StrategyType.LONG_PUT]:
                 # Find appropriate put strike from real option chain
                 put_options = option_chain.get('puts', [])
                 
@@ -596,46 +596,46 @@ class OptionsService:
                     quantity=base_contract_count if strategy_type == StrategyType.LONG_PUT else -base_contract_count
                 ))
                 
-            elif strategy_type == StrategyType.CREDIT_SPREAD:
-                # Create credit spread using real option chain
-                if underlying_price > 100:  # Call spread for higher priced stocks
-                    call_options = option_chain.get('calls', [])
-                    short_strike = self._find_closest_strike(call_options, underlying_price * 1.03)
-                    long_strike = self._find_closest_strike(call_options, underlying_price * 1.08)
-                    
-                    contracts.extend([
-                        OptionContract(
-                            option_type="call",
-                            strike_price=short_strike,
-                            expiration_date=expiration_date,
-                            quantity=-base_contract_count  # Short
-                        ),
-                        OptionContract(
-                            option_type="call",
-                            strike_price=long_strike,
-                            expiration_date=expiration_date,
-                            quantity=base_contract_count   # Long
-                        )
-                    ])
-                else:  # Put spread for lower priced stocks
-                    put_options = option_chain.get('puts', [])
-                    short_strike = self._find_closest_strike(put_options, underlying_price * 0.97)
-                    long_strike = self._find_closest_strike(put_options, underlying_price * 0.92)
-                    
-                    contracts.extend([
-                        OptionContract(
-                            option_type="put",
-                            strike_price=short_strike,
-                            expiration_date=expiration_date,
-                            quantity=-base_contract_count  # Short
-                        ),
-                        OptionContract(
-                            option_type="put",
-                            strike_price=long_strike,
-                            expiration_date=expiration_date,
-                            quantity=base_contract_count   # Long
-                        )
-                    ])
+            elif strategy_type == StrategyType.CALL_SPREAD:
+                # Create call spread using real option chain
+                call_options = option_chain.get('calls', [])
+                short_strike = self._find_closest_strike(call_options, underlying_price * 1.03)
+                long_strike = self._find_closest_strike(call_options, underlying_price * 1.08)
+                
+                contracts.extend([
+                    OptionContract(
+                        option_type="call",
+                        strike_price=short_strike,
+                        expiration_date=expiration_date,
+                        quantity=-base_contract_count  # Short
+                    ),
+                    OptionContract(
+                        option_type="call",
+                        strike_price=long_strike,
+                        expiration_date=expiration_date,
+                        quantity=base_contract_count   # Long
+                    )
+                ])
+            elif strategy_type == StrategyType.PUT_SPREAD:
+                # Create put spread using real option chain
+                put_options = option_chain.get('puts', [])
+                short_strike = self._find_closest_strike(put_options, underlying_price * 0.97)
+                long_strike = self._find_closest_strike(put_options, underlying_price * 0.92)
+                
+                contracts.extend([
+                    OptionContract(
+                        option_type="put",
+                        strike_price=short_strike,
+                        expiration_date=expiration_date,
+                        quantity=-base_contract_count  # Short
+                    ),
+                    OptionContract(
+                        option_type="put",
+                        strike_price=long_strike,
+                        expiration_date=expiration_date,
+                        quantity=base_contract_count   # Long
+                    )
+                ])
                     
             elif strategy_type == StrategyType.IRON_CONDOR:
                 # Create iron condor using real option chain
