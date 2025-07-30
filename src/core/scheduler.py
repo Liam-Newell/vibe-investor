@@ -7,6 +7,7 @@ import asyncio
 import logging
 from datetime import datetime, time
 from typing import Optional, Dict, Any, List
+import pytz
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -25,7 +26,9 @@ class TradingScheduler:
     """Scheduler for Claude sessions and position monitoring"""
     
     def __init__(self):
-        self.scheduler = AsyncIOScheduler()
+        # Set scheduler timezone to match system timezone
+        timezone = pytz.timezone(settings.TIMEZONE)
+        self.scheduler = AsyncIOScheduler(timezone=timezone)
         self._running = False
         
         # Initialize services
@@ -73,9 +76,10 @@ class TradingScheduler:
             
         hour, minute = map(int, settings.CLAUDE_MORNING_TIME.split(':'))
         
+        timezone = pytz.timezone(settings.TIMEZONE)
         self.scheduler.add_job(
             self._morning_session,
-            CronTrigger(hour=hour, minute=minute, day_of_week='mon-fri'),
+            CronTrigger(hour=hour, minute=minute, day_of_week='mon-fri', timezone=timezone),
             id='morning_session',
             name='Morning Claude Strategy Session'
         )
@@ -89,9 +93,10 @@ class TradingScheduler:
             
         hour, minute = map(int, settings.CLAUDE_EVENING_TIME.split(':'))
         
+        timezone = pytz.timezone(settings.TIMEZONE)
         self.scheduler.add_job(
             self._evening_session,
-            CronTrigger(hour=hour, minute=minute, day_of_week='mon-fri'),
+            CronTrigger(hour=hour, minute=minute, day_of_week='mon-fri', timezone=timezone),
             id='evening_session',
             name='Evening Claude Review Session'
         )

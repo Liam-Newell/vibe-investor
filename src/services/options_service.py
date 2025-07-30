@@ -13,6 +13,7 @@ from src.models.options import OptionsPosition, OptionContract, PortfolioSummary
 from src.core.config import settings
 from src.core.database import get_db
 from src.services.market_data_service import MarketDataService
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +40,23 @@ class OptionsService:
     async def _load_positions_from_db(self):
         """Load existing positions from database on startup"""
         try:
-            db = next(get_db())
-            db_positions = db.query(PositionDB).filter(PositionDB.status == "open").all()
-            
-            for db_pos in db_positions:
-                # Convert database position to in-memory position
-                position = self._db_position_to_model(db_pos)
-                if position:
-                    self.positions[position.id] = position
-                    logger.info(f"📥 Loaded position: {position.symbol} {position.strategy_type.value}")
-            
-            # Recalculate portfolio values based on loaded positions
-            await self._recalculate_portfolio_from_positions()
-            
-            logger.info(f"📥 Loaded {len(self.positions)} active positions from database")
+            async for db in get_db():
+                # Use async SQLAlchemy syntax
+                result = await db.execute(select(PositionDB).where(PositionDB.status == "open"))
+                db_positions = result.scalars().all()
+                
+                for db_pos in db_positions:
+                    # Convert database position to in-memory position
+                    position = self._db_position_to_model(db_pos)
+                    if position:
+                        self.positions[position.id] = position
+                        logger.info(f"📥 Loaded position: {position.symbol} {position.strategy_type.value}")
+                
+                # Recalculate portfolio values based on loaded positions
+                await self._recalculate_portfolio_from_positions()
+                
+                logger.info(f"📥 Loaded {len(self.positions)} active positions from database")
+                break  # Only need one database session
             
         except Exception as e:
             logger.error(f"❌ Failed to load positions from database: {e}")
