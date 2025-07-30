@@ -6,6 +6,7 @@ Main FastAPI application entry point
 
 import logging
 import asyncio
+import uvicorn
 from contextlib import asynccontextmanager
 from pathlib import Path
 
