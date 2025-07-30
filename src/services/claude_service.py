@@ -157,168 +157,405 @@ class ClaudeService:
                 "message": "Claude API test failed"
             }
     
-    async def morning_strategy_session(self, 
-                                     portfolio: PortfolioSummary,
-                                     market_data: Dict[str, Any],
-                                     earnings_calendar: List[Dict],
-                                     current_positions: List[OptionsPosition]) -> MorningStrategyResponse:
+    async def morning_strategy_session(self, portfolio: PortfolioSummary, market_data: Dict[str, Any], earnings_calendar: List[Dict], current_positions: List) -> MorningStrategyResponse:
         """
-        Morning Claude session for options strategy and stock selection
+        CLAUDE AUTONOMOUS TRADING: Claude picks everything independently
+        
+        Step 1: Claude autonomously selects stocks/options based on its knowledge
+        Step 2: Get live data for Claude's autonomous picks  
+        Step 3: Claude reviews live data and makes final decision with current context
+        Step 4: Dynamic confidence filtering + autonomous execution
+        
+        No human input - Claude makes ALL trading decisions
         """
-        logger.info("🌅 Starting morning Claude strategy session")
-        
-        if self.daily_query_count >= settings.CLAUDE_MAX_DAILY_QUERIES:
-            logger.warning("Daily Claude query limit reached")
-            return self._create_fallback_response()
-        
-        # Prepare context for Claude
-        context = self._prepare_morning_context(portfolio, market_data, earnings_calendar, current_positions)
-        
-        prompt = f"""
-        You are an expert options trader analyzing market conditions for today's trading opportunities.
-        
-        Current Portfolio Status:
-        {context['portfolio']}
-        
-        Performance History:
-        {context['performance_history']}
-        
-        Risk Assessment:
-        {context['risk_assessment']}
-        
-        Market Conditions:
-        {context['market']}
-        
-        Upcoming Earnings (Next 2 weeks):
-        {context['earnings']}
-        
-        Current Positions:
-        {context['positions']}
-        
-        ADAPTIVE RISK MANAGEMENT:
-        Based on your recent performance history, adjust your strategy:
-        
-        PERFORMANCE TRAJECTORY ANALYSIS:
-        - Recent P&L: 7 days: ${portfolio.performance_history.last_7_days_pnl:,.0f}, 30 days: ${portfolio.performance_history.last_30_days_pnl:,.0f}
-        - Current win/loss streak: {portfolio.performance_history.current_streak} ({'wins' if portfolio.performance_history.current_streak > 0 else 'losses' if portfolio.performance_history.current_streak < 0 else 'no streak'})
-        - Consecutive losses: {portfolio.performance_history.consecutive_losses}
-        - Days since last win: {portfolio.performance_history.days_since_last_win}
-        - Recent win rate (last 20 trades): {portfolio.performance_history.recent_win_rate:.1%}
-        - Overall win rate: {portfolio.win_rate:.1%}
-        - Current risk level: {portfolio.get_adaptive_risk_level()}
-        
-        ADAPTIVE STRATEGY RULES:
-        1. **If consecutive_losses >= 3**: VERY CONSERVATIVE - Consider 0-1 positions, focus on high-probability setups only
-        2. **If consecutive_losses >= 2**: CONSERVATIVE - Reduce position sizes by 30%, prefer lower-risk strategies  
-        3. **If losing streak + poor recent performance**: DEFENSIVE - Hold more cash, wait for better setups
-        4. **If winning streak >= 3 + profitable month**: MODERATE AGGRESSIVE - Can increase position sizes by 20%
-        5. **If winning streak >= 5**: AGGRESSIVE - Can use full position sizing, explore higher-reward setups
-        6. **If mixed/neutral performance**: NORMAL - Standard position sizing and risk levels
-        
-        POSITION SIZE ADJUSTMENT:
-        - Suggested position size multiplier: {portfolio.suggested_position_size_multiplier:.2f}
-        - Risk-adjusted confidence: {portfolio.risk_adjusted_confidence:.2f}
-        - If multiplier < 0.7: Use smaller position sizes and more conservative strategies
-        - If multiplier > 1.2: Can use larger position sizes and be more aggressive
-        
-        STRATEGY SELECTION BASED ON PERFORMANCE:
-        - After losses: Focus on higher-probability, defined-risk strategies (credit spreads, iron condors)
-        - After wins: Can explore directional plays and earnings strategies  
-        - During drawdowns: Emphasize capital preservation over growth
-        - During winning periods: Balance growth with risk management
-        
-        TASK: Analyze current market conditions and determine optimal position sizing for today.
-        You can recommend:
-        1. 0 new positions (hold cash if market conditions are unfavorable OR if performance history suggests caution)
-        2. 1-2 positions (cautious approach in uncertain markets OR after recent losses)
-        3. 3-4 positions (normal market conditions with good opportunities AND normal performance)
-        4. Up to {settings.MAX_SWING_POSITIONS - portfolio.open_positions} positions (strong market conditions + winning streak)
-        
-        POSITION SCALING STRATEGY:
-        - Maximum allowed positions: {settings.MAX_SWING_POSITIONS}
-        - Current open positions: {portfolio.open_positions}
-        - Available position slots: {settings.MAX_SWING_POSITIONS - portfolio.open_positions}
-        - CRITICAL: Scale position count based on BOTH market conditions AND performance history
-        
-        CASH MANAGEMENT DECISION CRITERIA:
-        - HOLD CASH when: Market volatility too high, unclear technical setups, major economic events pending, poor risk/reward ratios
-        - SCALE UP when: Clear directional signals, favorable IV environment, multiple uncorrelated opportunities, strong technical setups
-        - REDUCE EXPOSURE when: Approaching Greek limits, deteriorating market conditions, overextended positions
-        
-        CRITICAL: Consider portfolio Greeks limits:
-        - Current portfolio delta: {portfolio.total_delta}
-        - Current portfolio vega: {portfolio.total_vega}
-        - Maximum recommended delta exposure: ±{settings.MAX_PORTFOLIO_DELTA}
-        - Maximum recommended vega: ${settings.MAX_PORTFOLIO_VEGA} per 1% IV move
-        
-        CASH MANAGEMENT: Current cash balance is ${portfolio.cash_balance:,.0f}
-        - Consider market conditions: Is this a good time to deploy capital or preserve cash?
-        - Factor in upcoming events, volatility environment, and opportunity quality
-        
-        RESPONSE FORMAT: Return ONLY valid JSON object. No additional text, explanation, or markdown.
-        
-        Schema:
-        {{
-          "market_assessment": {{
-            "overall_sentiment": "bullish|bearish|neutral|uncertain",
-            "volatility_environment": "low|normal|elevated|extreme",
-            "opportunity_quality": "poor|fair|good|excellent",
-            "recommended_exposure": "minimal|conservative|normal|aggressive"
-          }},
-          "cash_strategy": {{
-            "action": "hold_cash|deploy_capital|reduce_exposure",
-            "reasoning": "Why this cash allocation strategy is optimal",
-            "target_cash_percentage": 40.0,
-            "urgency": "low|medium|high"
-          }},
-          "opportunities": [
-            {{
-              "symbol": "AAPL",
-              "strategy_type": "long_call",
-              "contracts": [
-                {{
-                  "option_type": "call",
-                  "strike_price": 150.0,
-                  "expiration_date": "2024-02-16",
-                  "quantity": 1
-                }}
-              ],
-              "rationale": "Strong technical setup with bullish divergence...",
-              "confidence": 0.85,
-              "risk_assessment": "Low risk due to defined max loss...",
-              "target_return": 50.0,
-              "max_risk": 500.0,
-              "time_horizon": 21,
-              "priority": "high|medium|low"
-            }}
-          ]
-        }}
-        
-        Analysis Focus:
-        - Options with favorable IV rank vs historical volatility
-        - Upcoming earnings or events that could drive volatility
-        - Technical setups that suggest directional moves
-        - Positions that complement existing portfolio
-        - Cash preservation vs deployment timing
-        - Portfolio Greek balance and risk limits
-        
-        DECISION FLEXIBILITY:
-        - You can recommend 0 positions if market conditions warrant cash preservation
-        - You can recommend up to {settings.MAX_SWING_POSITIONS - portfolio.open_positions} positions if conditions are optimal
-        - Always prioritize capital preservation over forcing trades
-        """
-        
-        try:
-            response = await self._query_claude(prompt, "morning_strategy")
-            opportunities = self._parse_morning_response(response)
-            self.daily_query_count += 1
+        if not self.client:
+            await self._initialize_client()
             
-            logger.info(f"✅ Morning session complete. Found {len(opportunities.opportunities)} opportunities")
-            return opportunities
+        try:
+            # STEP 1: Claude's autonomous trading picks (no proposals from us)
+            logger.info("🤖 Step 1: Claude autonomously selecting trading opportunities...")
+            initial_recommendations = await self._get_claude_initial_picks(portfolio, current_positions)
+            
+            if not initial_recommendations or len(initial_recommendations) == 0:
+                logger.warning("⚠️ Claude provided no autonomous trading picks")
+                return self._create_fallback_response()
+            
+            # Extract symbols from Claude's autonomous picks with validation
+            recommended_symbols = []
+            for rec in initial_recommendations:
+                symbol = rec.get('symbol', '').strip().upper()
+                if symbol and len(symbol) <= 10:  # Valid stock symbol length
+                    recommended_symbols.append(symbol)
+                else:
+                    logger.warning(f"⚠️ Invalid symbol from Claude: {symbol}")
+            
+            if not recommended_symbols:
+                logger.error("❌ No valid symbols from Claude's autonomous picks")
+                return self._create_fallback_response()
+            
+            logger.info(f"📊 Claude autonomously picked symbols: {recommended_symbols}")
+            
+            # STEP 2: Get live market data for Claude's autonomous picks only
+            logger.info("🔍 Step 2: Searching live data for Claude's autonomous stock picks...")
+            live_market_data = await self._search_live_data_for_symbols(recommended_symbols)
+            
+            if not live_market_data:
+                logger.warning("⚠️ No live market data found for Claude's picks")
+                # Continue anyway - Claude can still make decisions with knowledge
+            
+            # STEP 3: Claude reviews live data and makes final autonomous decision
+            logger.info("🤖 Step 3: Claude making final autonomous decision with live market context...")
+            final_strategy_response = await self._get_claude_final_decision(
+                portfolio, initial_recommendations, live_market_data, current_positions
+            )
+            
+            if final_strategy_response:
+                num_opportunities = len(final_strategy_response.opportunities)
+                logger.info(f"🎯 Claude's final autonomous decision: {num_opportunities} confirmed opportunities")
+                
+                # Log Claude's autonomous analysis
+                if hasattr(final_strategy_response, 'market_assessment'):
+                    assessment = final_strategy_response.market_assessment
+                    logger.info(f"📊 Claude's market sentiment: {assessment.overall_sentiment}")
+                    if hasattr(assessment, 'key_observations'):
+                        logger.info(f"📊 Claude's key observations: {assessment.key_observations}")
+                
+                return final_strategy_response
+            else:
+                logger.warning("⚠️ Claude changed mind after reviewing live data - no final picks")
+                return self._create_fallback_response()
+                
+        except Exception as e:
+            logger.error(f"❌ Claude autonomous trading process failed: {e}")
+            return self._create_fallback_response()
+    
+    async def _get_claude_initial_picks(self, portfolio: PortfolioSummary, current_positions: List) -> List[Dict[str, Any]]:
+        """Step 1: Claude autonomously picks stocks/options based on its knowledge"""
+        try:
+            prompt = f"""
+            🤖 AUTONOMOUS OPTIONS TRADING PICKS
+            
+            You are an expert options trader. Based on your knowledge of the current market environment (early 2025), 
+            independently select 3-6 specific options trading opportunities that you believe are good trades right now.
+            
+            CURRENT PORTFOLIO CONTEXT:
+            • Portfolio value: ${portfolio.total_value:,.0f}
+            • Cash available: ${portfolio.cash_balance:,.0f}
+            • Open positions: {portfolio.open_positions}/{settings.MAX_SWING_POSITIONS}
+            • Performance streak: {portfolio.performance_history.current_streak}
+            • Recent win rate: {portfolio.performance_history.recent_win_rate:.1%}
+            • Risk level: {portfolio.get_adaptive_risk_level()}
+            
+            CURRENT POSITIONS (avoid duplicates):
+            {[f"{p.symbol} {p.strategy_type.value}" for p in current_positions]}
+            
+            YOUR TASK: AUTONOMOUSLY PICK GOOD OPTIONS TRADES
+            
+            GUIDELINES:
+            1. Pick specific stocks/ETFs YOU believe have good options trading opportunities
+            2. Choose from high-liquidity symbols (AAPL, MSFT, GOOGL, AMZN, TSLA, SPY, QQQ, NVDA, META, etc.)
+            3. Consider what you know about:
+               - Earnings seasons and cycles
+               - Market seasonality patterns  
+               - Technical setups and support/resistance levels
+               - Volatility environments
+               - Sector rotations and trends
+            4. Mix different strategies based on your market outlook
+            5. Factor in the portfolio's performance streak for risk management
+            6. Avoid symbols already in current positions
+            
+            STRATEGY SELECTION (pick what YOU think is best):
+            - Long calls: If you're bullish on a stock
+            - Long puts: If you're bearish on a stock  
+            - Credit spreads: If you want defined risk/reward
+            - Iron condors: If you expect range-bound movement
+            - Put spreads: If you're moderately bearish
+            
+            IMPORTANT: 
+            - Make YOUR OWN decisions based on your knowledge
+            - I will search for live market data on your picks
+            - You'll get a chance to review current prices before final decision
+            
+            RETURN FORMAT - VALID JSON ONLY:
+            [
+                {{
+                    "symbol": "AAPL",
+                    "strategy_type": "long_call",
+                    "initial_confidence": 0.75,
+                    "rationale": "Strong iPhone demand and technical breakout expected",
+                    "reasoning": "Detailed explanation of why this is a good trade",
+                    "time_horizon": "3-4 weeks",
+                    "expected_move": "bullish to $240"
+                }},
+                {{
+                    "symbol": "SPY", 
+                    "strategy_type": "iron_condor",
+                    "initial_confidence": 0.68,
+                    "rationale": "Market showing range-bound behavior, good premium collection",
+                    "reasoning": "VIX elevated, expecting sideways movement",
+                    "time_horizon": "2-3 weeks", 
+                    "expected_move": "sideways 450-460"
+                }}
+            ]
+            
+            CRITICAL: Return ONLY valid JSON array. No other text, explanations, or markdown.
+            Pick trades YOU genuinely believe in based on your market knowledge.
+            """
+            
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=2000,
+                temperature=0.4,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            content = response.content[0].text.strip()
+            logger.info(f"🤖 Claude provided autonomous trading picks")
+            
+            # Parse JSON response with better error handling
+            try:
+                import json
+                
+                # Clean the response - remove any markdown formatting
+                content = content.replace('```json', '').replace('```', '').strip()
+                
+                # Find JSON array bounds
+                start_idx = content.find('[')
+                end_idx = content.rfind(']') + 1
+                
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = content[start_idx:end_idx]
+                    recommendations = json.loads(json_str)
+                    
+                    # Validate the structure
+                    valid_recommendations = []
+                    for rec in recommendations:
+                        if self._validate_recommendation_structure(rec):
+                            valid_recommendations.append(rec)
+                        else:
+                            logger.warning(f"⚠️ Invalid recommendation structure: {rec}")
+                    
+                    if valid_recommendations:
+                        logger.info(f"✅ Claude autonomously picked {len(valid_recommendations)} trading opportunities")
+                        for rec in valid_recommendations:
+                            logger.info(f"   📊 {rec['symbol']} {rec['strategy_type']} (confidence: {rec.get('initial_confidence', 0):.1%})")
+                        return valid_recommendations
+                    else:
+                        logger.warning("⚠️ No valid recommendations in Claude's response")
+                        return []
+                else:
+                    logger.warning("⚠️ No valid JSON array found in Claude's response")
+                    return []
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ JSON parsing error in Claude's autonomous picks: {e}")
+                logger.error(f"Raw content: {content}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get Claude's autonomous picks: {e}")
+            return []
+    
+    def _validate_recommendation_structure(self, rec: Dict[str, Any]) -> bool:
+        """Validate that Claude's recommendation has the required structure for live data search"""
+        required_fields = ['symbol', 'strategy_type', 'initial_confidence']
+        
+        # Check required fields
+        for field in required_fields:
+            if field not in rec:
+                logger.warning(f"Missing required field: {field}")
+                return False
+        
+        # Validate symbol is string and not empty
+        if not isinstance(rec['symbol'], str) or not rec['symbol'].strip():
+            logger.warning(f"Invalid symbol: {rec.get('symbol')}")
+            return False
+        
+        # Validate strategy type
+        valid_strategies = ['long_call', 'long_put', 'credit_spread', 'iron_condor', 'put_spread', 'short_call', 'short_put']
+        if rec['strategy_type'] not in valid_strategies:
+            logger.warning(f"Invalid strategy type: {rec.get('strategy_type')}")
+            return False
+        
+        # Validate confidence is numeric
+        confidence = rec.get('initial_confidence')
+        if not isinstance(confidence, (int, float)) or confidence < 0 or confidence > 1:
+            logger.warning(f"Invalid confidence: {confidence}")
+            return False
+        
+        return True
+    
+    async def _search_live_data_for_symbols(self, symbols: List[str]) -> Dict[str, Any]:
+        """Step 2: Get live market data for Claude's recommended symbols"""
+        try:
+            # Import web search function
+            from src.utils.web_search import search_stock_data
+            
+            live_data = {}
+            
+            for symbol in symbols:
+                logger.info(f"🔍 Searching live data for {symbol}...")
+                
+                # Search for current stock data
+                search_results = await search_stock_data(symbol)
+                
+                if search_results:
+                    live_data[symbol] = search_results
+                    logger.info(f"✅ Found live data for {symbol}: ${search_results.get('price', 'N/A')}")
+                else:
+                    logger.warning(f"⚠️ No live data found for {symbol}")
+                    live_data[symbol] = {"error": "No live data available"}
+            
+            return live_data
+            
+        except ImportError:
+            # Fallback: use our market data service
+            logger.info("📊 Using market data service as fallback...")
+            return await self._get_market_data_fallback(symbols)
+        except Exception as e:
+            logger.error(f"❌ Failed to search live data: {e}")
+            return {}
+    
+    async def _get_market_data_fallback(self, symbols: List[str]) -> Dict[str, Any]:
+        """Fallback: Use our market data service for live data"""
+        try:
+            from src.services.market_data_service import MarketDataService
+            
+            market_service = MarketDataService()
+            await market_service.initialize()
+            
+            live_data = {}
+            
+            for symbol in symbols:
+                try:
+                    data = await market_service.get_market_data(symbol)
+                    if data:
+                        live_data[symbol] = {
+                            "price": data.price,
+                            "change_pct": data.change_pct,
+                            "volume": data.volume,
+                            "bid": data.bid,
+                            "ask": data.ask,
+                            "timestamp": data.timestamp.isoformat()
+                        }
+                        logger.info(f"✅ Market data for {symbol}: ${data.price:.2f} ({data.change_pct:+.2f}%)")
+                    else:
+                        live_data[symbol] = {"error": "No data available"}
+                        
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to get data for {symbol}: {e}")
+                    live_data[symbol] = {"error": str(e)}
+            
+            await market_service.close()
+            return live_data
             
         except Exception as e:
-            logger.error(f"❌ Morning strategy session failed: {e}")
-            return self._create_fallback_response()
+            logger.error(f"❌ Market data fallback failed: {e}")
+            return {}
+    
+    async def _get_claude_final_decision(self, portfolio: PortfolioSummary, initial_recommendations: List[Dict], live_data: Dict[str, Any], current_positions: List) -> Optional[MorningStrategyResponse]:
+        """Step 3: Claude reviews live data for its own autonomous picks and makes final decision"""
+        try:
+            # Format live data for Claude
+            live_data_summary = self._format_live_data_for_claude(live_data)
+            
+            prompt = f"""
+            🤖 FINAL AUTONOMOUS TRADING DECISION WITH LIVE MARKET DATA
+            
+            Earlier, you autonomously selected these options trading opportunities:
+            {json.dumps(initial_recommendations, indent=2)}
+            
+            Here is the LIVE MARKET DATA for YOUR selected symbols:
+            {live_data_summary}
+            
+            PORTFOLIO CONTEXT:
+            • Portfolio value: ${portfolio.total_value:,.0f}
+            • Cash available: ${portfolio.cash_balance:,.0f}
+            • Performance streak: {portfolio.performance_history.current_streak}
+            • Risk level: {portfolio.get_adaptive_risk_level()}
+            
+            YOUR AUTONOMOUS DECISION:
+            Looking at the live market data for YOUR selected stocks, do you want to proceed with these trades?
+            You can:
+            1. Confirm your picks with specific position details
+            2. Modify some based on current prices/conditions  
+            3. Remove any that no longer look attractive
+            4. Recommend holding cash if current conditions don't support your ideas
+            
+            RESPONSE FORMAT (JSON ONLY):
+            {{
+                "market_assessment": {{
+                    "overall_sentiment": "Your autonomous assessment of current market conditions",
+                    "key_observations": "What the live data tells you about your selected symbols",
+                    "recommended_exposure": "Conservative/Normal/Aggressive"
+                }},
+                "cash_strategy": {{
+                    "action": "DEPLOY/PARTIAL_DEPLOY/HOLD_CASH",
+                    "percentage": 70,
+                    "reasoning": "Why this allocation makes sense given live conditions"
+                }},
+                "opportunities": [
+                    {{
+                        "symbol": "AAPL",
+                        "strategy_type": "long_call",
+                        "confidence": 0.78,
+                        "target_return": 1500.0,
+                        "max_risk": 1200.0,
+                        "time_horizon_days": 21,
+                        "strike_price": 230.0,
+                        "rationale": "Updated rationale with live market context",
+                        "entry_criteria": "Specific entry conditions",
+                        "exit_criteria": "Profit target and stop loss",
+                        "live_data_validation": "How current price/volume supports YOUR trade idea"
+                    }}
+                ]
+            }}
+            
+            CRITICAL: Base your final autonomous decision on the LIVE market data for YOUR picks.
+            If the current prices don't support your original ideas, modify or remove them.
+            Only proceed with opportunities that still make sense given current market conditions.
+            These are YOUR autonomous trading decisions - make the best choices.
+            """
+            
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=4000,
+                temperature=0.3,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            content = response.content[0].text.strip()
+            logger.info(f"🤖 Claude reviewed live data for its autonomous picks")
+            
+            # Parse the final response
+            parsed_response = self._parse_live_morning_response(content)
+            
+            if parsed_response:
+                logger.info(f"✅ Claude confirmed {len(parsed_response.opportunities)} autonomous opportunities after live data review")
+                return parsed_response
+            else:
+                logger.warning("⚠️ Failed to parse Claude's final autonomous decision")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to get Claude's final autonomous decision: {e}")
+            return None
+    
+    def _format_live_data_for_claude(self, live_data: Dict[str, Any]) -> str:
+        """Format live market data in a readable way for Claude"""
+        formatted = "LIVE MARKET DATA:\n"
+        
+        for symbol, data in live_data.items():
+            if "error" in data:
+                formatted += f"• {symbol}: ❌ {data['error']}\n"
+            else:
+                price = data.get('price', 'N/A')
+                change = data.get('change_pct', 0)
+                volume = data.get('volume', 0)
+                
+                formatted += f"• {symbol}: ${price:.2f} ({change:+.2f}%) | Volume: {volume:,}\n"
+        
+        return formatted
     
     async def analyze_position(self, 
                              position: OptionsPosition,
@@ -563,6 +800,68 @@ class ClaudeService:
         except Exception as e:
             logger.error(f"❌ Emergency analysis failed: {e}")
             return None
+    
+    async def get_position_management_advice(self, prompt: str) -> Optional[Dict[str, Any]]:
+        """Get Claude's advice for position management and exit decisions"""
+        try:
+            if not self.client:
+                await self._initialize_client()
+            
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=1000,
+                temperature=0.3,  # Lower temperature for more consistent decisions
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+            
+            content = response.content[0].text.strip()
+            
+            # Try to parse JSON response
+            try:
+                import json
+                # Extract JSON from response if it's wrapped in other text
+                start_idx = content.find('{')
+                end_idx = content.rfind('}') + 1
+                
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = content[start_idx:end_idx]
+                    result = json.loads(json_str)
+                    
+                    # Validate response structure
+                    if 'action' in result and 'reasoning' in result:
+                        logger.info(f"🤖 Claude position advice: {result['action']} ({result.get('confidence', 0):.1%})")
+                        return result
+                
+            except json.JSONDecodeError:
+                logger.warning("⚠️ Could not parse Claude's JSON response for position management")
+            
+            # Fallback: try to extract action from text
+            content_lower = content.lower()
+            if 'close' in content_lower or 'sell' in content_lower or 'exit' in content_lower:
+                return {
+                    "action": "CLOSE",
+                    "confidence": 0.6,
+                    "reasoning": "Text analysis suggests closing position"
+                }
+            else:
+                return {
+                    "action": "HOLD",
+                    "confidence": 0.6, 
+                    "reasoning": "Text analysis suggests holding position"
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Claude position management advice failed: {e}")
+            return {
+                "action": "HOLD",
+                "confidence": 0.5,
+                "reasoning": f"Error in analysis: {str(e)}"
+            }
     
     def cleanup_conversation(self, conversation_id: str):
         """Clean up conversation thread when position is closed"""
@@ -835,3 +1134,115 @@ class ClaudeService:
             }, indent=2),
             "market": json.dumps(market_data, indent=2)
         } 
+
+    def _prepare_live_market_context(self, portfolio: PortfolioSummary, market_data: Dict[str, Any], earnings_calendar: List[Dict], positions: List) -> Dict[str, str]:
+        """Prepare comprehensive live market context for Claude analysis"""
+        
+        # Format live market data
+        live_market_summary = f"""
+        REAL-TIME MARKET DATA:
+        • SPY: ${market_data.get('spy_price', 'N/A')} ({market_data.get('spy_change', 0):+.2f}%)
+        • QQQ: ${market_data.get('qqq_price', 'N/A')} ({market_data.get('qqq_change', 0):+.2f}%)
+        • VIX: {market_data.get('vix', 'N/A')} ({market_data.get('vix_change', 0):+.2f}%)
+        • Dollar Index: {market_data.get('dollar_index', 'N/A')}
+        
+        MARKET SENTIMENT: {market_data.get('market_sentiment', 'Unknown')}
+        VOLATILITY TREND: {market_data.get('volatility_trend', 'Unknown')}
+        MARKET HOURS: {'OPEN' if market_data.get('market_hours', False) else 'CLOSED'}
+        DATA SOURCE: {market_data.get('data_source', 'Live')}
+        
+        SECTOR PERFORMANCE (Live ETF Data):
+        """
+        
+        # Add sector performance if available
+        sector_performance = market_data.get('sector_performance', {})
+        for sector, performance in sector_performance.items():
+            live_market_summary += f"• {sector}: {performance:+.2f}%\n"
+        
+        return {
+            "live_market": live_market_summary,
+            "portfolio": json.dumps({
+                "total_value": portfolio.total_value,
+                "cash_balance": portfolio.cash_balance,
+                "open_positions": portfolio.open_positions,
+                "total_pnl": portfolio.total_pnl,
+                "win_rate": portfolio.win_rate,
+                "max_drawdown": portfolio.max_drawdown,
+                "portfolio_utilization": portfolio.portfolio_utilization
+            }, indent=2),
+            "performance_history": json.dumps({
+                "current_streak": portfolio.performance_history.current_streak,
+                "consecutive_losses": portfolio.performance_history.consecutive_losses,
+                "days_since_last_win": portfolio.performance_history.days_since_last_win,
+                "recent_win_rate": portfolio.performance_history.recent_win_rate,
+                "last_7_days_pnl": portfolio.performance_history.last_7_days_pnl,
+                "last_30_days_pnl": portfolio.performance_history.last_30_days_pnl,
+                "performance_trend": portfolio.performance_history.performance_trend,
+                "risk_confidence": portfolio.performance_history.risk_confidence
+            }, indent=2),
+            "risk_assessment": json.dumps({
+                "current_risk_level": portfolio.get_adaptive_risk_level(),
+                "risk_adjusted_confidence": portfolio.risk_adjusted_confidence,
+                "suggested_position_size_multiplier": portfolio.suggested_position_size_multiplier,
+                "adaptive_thresholds_active": True
+            }, indent=2),
+            "positions": json.dumps([{
+                "symbol": p.symbol,
+                "strategy": p.strategy_type.value,
+                "pnl": getattr(p, 'unrealized_pnl', 0),
+                "days_held": (datetime.now() - p.entry_date).days if hasattr(p, 'entry_date') else 0,
+                "current_value": getattr(p, 'current_value', 0)
+            } for p in positions], indent=2),
+            "earnings": json.dumps(earnings_calendar, indent=2) if earnings_calendar else "No major earnings this week"
+        }
+    
+    def _parse_live_morning_response(self, content: str) -> Optional[MorningStrategyResponse]:
+        """Parse Claude's live market analysis response"""
+        try:
+            # Extract JSON from response
+            start_idx = content.find('{')
+            end_idx = content.rfind('}') + 1
+            
+            if start_idx >= 0 and end_idx > start_idx:
+                json_str = content[start_idx:end_idx]
+                data = json.loads(json_str)
+                
+                # Validate required structure
+                if not all(key in data for key in ['market_assessment', 'cash_strategy', 'opportunities']):
+                    logger.warning("⚠️ Missing required keys in Claude's response")
+                    return None
+                
+                # Parse market assessment
+                market_assessment = MarketAssessment(**data['market_assessment'])
+                
+                # Parse cash strategy
+                cash_strategy = CashStrategy(**data['cash_strategy'])
+                
+                # Parse opportunities
+                opportunities = []
+                for opp_data in data['opportunities']:
+                    try:
+                        opportunity = EnhancedOptionsOpportunity(**opp_data)
+                        opportunities.append(opportunity)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Skipping invalid opportunity: {e}")
+                        continue
+                
+                logger.info(f"✅ Successfully parsed {len(opportunities)} live opportunities from Claude")
+                
+                return MorningStrategyResponse(
+                    market_assessment=market_assessment,
+                    cash_strategy=cash_strategy,
+                    opportunities=opportunities
+                )
+                
+            else:
+                logger.warning("⚠️ No valid JSON found in Claude's response")
+                return None
+                
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ JSON parsing error in live response: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error parsing live morning response: {e}")
+            return None 

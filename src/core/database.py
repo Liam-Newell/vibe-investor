@@ -46,6 +46,9 @@ async def init_db():
         logger.error(f"❌ Database initialization failed: {e}")
         raise
 
+# Alias for consistency
+init_database = init_db
+
 async def close_db():
     """Close database connections"""
     await engine.dispose()

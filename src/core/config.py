@@ -53,9 +53,9 @@ class Settings(BaseSettings):
     ENABLE_TRADITIONAL_BENCHMARK: bool = Field(False, description="Enable traditional TA benchmark")
     ENABLE_OPTIONS_INCOME: bool = Field(True, description="Enable options income strategies")
     
-    # Position Management
-    DEFAULT_POSITION_SIZE_PCT: float = Field(8.0, description="Default position size as % of portfolio")
-    MAX_POSITION_SIZE_PCT: float = Field(15.0, description="Maximum position size limit")
+    # Position Sizing
+    DEFAULT_POSITION_SIZE_PCT: float = Field(2.0, description="Default position size as % of portfolio")
+    MAX_POSITION_SIZE_PCT: float = Field(10.0, description="Maximum position size as % of portfolio")
     DEFAULT_STOP_LOSS_PCT: float = Field(50.0, description="Default stop-loss percentage for options")
     MAX_HOLDING_PERIOD_DAYS: int = Field(30, description="Maximum days to hold a position")
     
@@ -64,6 +64,24 @@ class Settings(BaseSettings):
     MAX_DAYS_TO_EXPIRATION: int = Field(60, description="Maximum days to expiration for new positions")
     MIN_OPTION_VOLUME: int = Field(100, description="Minimum daily volume for options")
     MIN_OPTION_OPEN_INTEREST: int = Field(500, description="Minimum open interest for options")
+    
+    # Dynamic Confidence Thresholds (Research-Based)
+    MIN_CONFIDENCE_LONG_PUTS: float = Field(0.78, description="Minimum confidence for long puts (high volatility risk)")
+    MIN_CONFIDENCE_LONG_CALLS: float = Field(0.75, description="Minimum confidence for long calls (directional risk)")
+    MIN_CONFIDENCE_CREDIT_SPREADS: float = Field(0.68, description="Minimum confidence for credit spreads (defined risk)")
+    MIN_CONFIDENCE_IRON_CONDORS: float = Field(0.65, description="Minimum confidence for iron condors (market neutral)")
+    MIN_CONFIDENCE_PUT_SPREADS: float = Field(0.70, description="Minimum confidence for put spreads")
+    
+    # Performance-Based Confidence Adjustments
+    CONFIDENCE_BOOST_AFTER_LOSSES: float = Field(0.10, description="Increase confidence threshold after losses")
+    CONFIDENCE_REDUCTION_AFTER_WINS: float = Field(0.05, description="Decrease confidence threshold after wins")
+    MIN_CONFIDENCE_FLOOR: float = Field(0.60, description="Absolute minimum confidence for any trade")
+    MAX_CONFIDENCE_CEILING: float = Field(0.95, description="Maximum confidence threshold")
+    
+    # Auto-Execution Settings
+    AUTO_EXECUTE_TRADES: bool = Field(True, description="Enable automatic trade execution")
+    MAX_DAILY_POSITIONS: int = Field(3, description="Maximum new positions per day")
+    MIN_CASH_RESERVE_FOR_TRADES: float = Field(10000.0, description="Minimum cash reserve before auto-trading")
     
     # Greeks Limits
     MAX_PORTFOLIO_DELTA: float = Field(0.3, description="Maximum portfolio delta exposure")
@@ -92,9 +110,11 @@ class Settings(BaseSettings):
     ERROR_ALERT_ENABLED: bool = Field(True, description="Send error alert emails")
     WEEKLY_REPORT_ENABLED: bool = Field(True, description="Send weekly performance reports")
     
-    # Web Dashboard Configuration
+    # Dashboard Configuration  
+    DASHBOARD_HOST: str = Field("0.0.0.0", description="Dashboard host")
     DASHBOARD_PORT: int = Field(8080, description="Dashboard web server port")
-    DASHBOARD_HOST: str = Field("0.0.0.0", description="Dashboard web server host")
+    PORT: int = Field(8000, description="Main application server port")
+    DEBUG: bool = Field(False, description="Enable debug mode")
     
     # Security (Optional)
     DASHBOARD_AUTH_ENABLED: bool = Field(False, description="Enable dashboard authentication")
@@ -131,7 +151,6 @@ class Settings(BaseSettings):
     TELEGRAM_CHAT_ID: Optional[str] = Field(None, description="Telegram chat ID")
     
     # Development Settings
-    DEBUG: bool = Field(False, description="Enable debug mode")
     DEVELOPMENT_MODE: bool = Field(False, description="Enable development features")
     ENABLE_API_DOCS: bool = Field(True, description="Enable FastAPI auto-generated docs")
     

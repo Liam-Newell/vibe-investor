@@ -126,12 +126,38 @@ class EmailService:
                                           claude_analysis: str) -> str:
         """Generate beautiful morning report HTML using Claude"""
         
-        # Prepare data for Claude to format
+        # Enhanced data with performance history
         report_data = {
             "date": datetime.now().strftime("%A, %B %d, %Y"),
             "portfolio_value": f"${portfolio.total_value:,.2f}",
             "cash_balance": f"${portfolio.cash_balance:,.2f}",
             "open_positions": portfolio.open_positions,
+            "total_pnl": f"${portfolio.total_pnl:,.2f}",
+            "win_rate": f"{portfolio.win_rate:.1f}%",
+            "max_drawdown": f"{portfolio.max_drawdown:.1f}%",
+            
+            # Performance history tracking
+            "performance_history": {
+                "last_7_days_pnl": f"${portfolio.performance_history.last_7_days_pnl:,.0f}",
+                "last_30_days_pnl": f"${portfolio.performance_history.last_30_days_pnl:,.0f}",
+                "last_60_days_pnl": f"${portfolio.performance_history.last_60_days_pnl:,.0f}",
+                "current_streak": portfolio.performance_history.current_streak,
+                "streak_type": "wins" if portfolio.performance_history.current_streak > 0 else "losses" if portfolio.performance_history.current_streak < 0 else "no streak",
+                "consecutive_losses": portfolio.performance_history.consecutive_losses,
+                "days_since_last_win": portfolio.performance_history.days_since_last_win,
+                "recent_win_rate": f"{portfolio.performance_history.recent_win_rate:.1f}%",
+                "performance_trend": portfolio.performance_history.performance_trend,
+                "strategy_performance": portfolio.performance_history.strategy_performance
+            },
+            
+            # Risk assessment
+            "risk_assessment": {
+                "current_risk_level": portfolio.get_adaptive_risk_level(),
+                "risk_adjusted_confidence": f"{portfolio.risk_adjusted_confidence:.1%}",
+                "suggested_position_size_multiplier": f"{portfolio.suggested_position_size_multiplier:.2f}x",
+                "portfolio_utilization": f"{portfolio.portfolio_utilization:.1f}%"
+            },
+            
             "market_data": market_data,
             "opportunities": opportunities,
             "claude_analysis": claude_analysis
@@ -139,51 +165,68 @@ class EmailService:
         
         if self.claude_service:
             try:
-                # Ask Claude to create a beautiful HTML report
+                # Simplified, more reliable Claude prompt
                 prompt = f"""
-                Create a beautiful, professional HTML email report for a trading system morning briefing.
+                Create a professional HTML email report for morning trading briefing.
                 
-                Data to include:
-                {report_data}
+                CRITICAL REQUIREMENTS:
+                1. Always include TODAY'S OPPORTUNITIES section with specific trades
+                2. Always include performance metrics and streak information
+                3. Use proper HTML structure with inline CSS
+                4. Make it visually appealing with color coding
                 
-                The report should be:
-                1. Visually appealing with proper CSS styling
-                2. Well-organized with clear sections
-                3. Include color coding (green for positive, red for negative)
-                4. Professional but engaging tone
-                5. Easy to scan quickly
+                Data to format:
+                Portfolio: {report_data['portfolio_value']} total, {report_data['cash_balance']} cash
+                Performance: {report_data['performance_history']['current_streak']} streak, {report_data['performance_history']['last_7_days_pnl']} (7d)
                 
-                Sections to include:
-                - Header with date and portfolio snapshot
+                Opportunities to display:
+                {opportunities}
+                
+                Market: {market_data}
+                
+                Create a complete HTML email that shows:
+                - Header with date and portfolio snapshot  
+                - Performance streak with emojis (🔥 for wins, ❄️ for losses)
+                - TODAY'S TRADING OPPORTUNITIES table with all opportunities
+                - Risk assessment with current level
                 - Market overview
-                - Today's opportunities with specific details
-                - Risk assessment
-                - Action items
                 
-                Generate complete HTML with inline CSS. Make it look like a professional financial report.
+                Return only the complete HTML code.
                 """
                 
+                logger.info(f"📧 Generating Claude HTML report with {len(opportunities)} opportunities")
                 claude_html = await self.claude_service._query_claude(prompt, "email_report")
                 
-                # Extract HTML from Claude's response
-                if "<html>" in claude_html.lower():
-                    return claude_html
+                # Validate Claude response
+                if claude_html and len(claude_html.strip()) > 100:
+                    if "<html>" in claude_html.lower() or "<div>" in claude_html.lower():
+                        logger.info("📧 ✅ Claude HTML generation successful")
+                        return self._wrap_html_if_needed(claude_html)
+                    else:
+                        logger.warning("📧 ⚠️ Claude response missing HTML structure, using fallback")
                 else:
-                    # Wrap in HTML if Claude didn't provide full HTML
-                    return f"""
-                    <html>
-                    <head><title>Morning Trading Report</title></head>
-                    <body style="font-family: Arial, sans-serif; margin: 20px;">
-                    {claude_html}
-                    </body>
-                    </html>
-                    """
+                    logger.warning(f"📧 ⚠️ Claude response too short ({len(claude_html) if claude_html else 0} chars), using fallback")
                     
             except Exception as e:
-                logger.warning(f"Claude HTML generation failed: {e}, using fallback template")
+                logger.error(f"📧 ❌ Claude HTML generation failed: {e}, using fallback template")
         
-        # Fallback template if Claude is unavailable
+        # Always use fallback template to ensure content is displayed
+        logger.info("📧 Using enhanced fallback template")
         return self._fallback_morning_template(report_data)
+    
+    def _wrap_html_if_needed(self, content: str) -> str:
+        """Wrap content in HTML if needed"""
+        if "<html>" in content.lower():
+            return content
+        else:
+            return f"""
+            <html>
+            <head><title>Morning Trading Report</title></head>
+            <body style="font-family: Arial, sans-serif; margin: 20px;">
+            {content}
+            </body>
+            </html>
+            """
     
     async def _generate_evening_report_html(self,
                                           portfolio: PortfolioSummary,
@@ -197,6 +240,7 @@ class EmailService:
         daily_pnl = sum(pos.unrealized_pnl for pos in positions)
         daily_pnl_pct = (daily_pnl / portfolio.total_value) * 100 if portfolio.total_value > 0 else 0
         
+        # Enhanced evening report data
         report_data = {
             "date": datetime.now().strftime("%A, %B %d, %Y"),
             "portfolio_value": f"${portfolio.total_value:,.2f}",
@@ -205,13 +249,40 @@ class EmailService:
             "total_pnl": f"${portfolio.total_pnl:,.2f}",
             "open_positions": portfolio.open_positions,
             "win_rate": f"{portfolio.win_rate:.1f}%",
+            "max_drawdown": f"{portfolio.max_drawdown:.1f}%",
+            
+            # Enhanced performance tracking
+            "performance_history": {
+                "last_7_days_pnl": f"${portfolio.performance_history.last_7_days_pnl:,.0f}",
+                "last_30_days_pnl": f"${portfolio.performance_history.last_30_days_pnl:,.0f}",
+                "last_60_days_pnl": f"${portfolio.performance_history.last_60_days_pnl:,.0f}",
+                "current_streak": portfolio.performance_history.current_streak,
+                "streak_type": "wins" if portfolio.performance_history.current_streak > 0 else "losses" if portfolio.performance_history.current_streak < 0 else "no streak",
+                "consecutive_losses": portfolio.performance_history.consecutive_losses,
+                "days_since_last_win": portfolio.performance_history.days_since_last_win,
+                "recent_win_rate": f"{portfolio.performance_history.recent_win_rate:.1f}%",
+                "performance_trend": portfolio.performance_history.performance_trend.title(),
+                "strategy_performance": portfolio.performance_history.strategy_performance
+            },
+            
+            # Risk and confidence metrics
+            "risk_assessment": {
+                "current_risk_level": portfolio.get_adaptive_risk_level(),
+                "risk_adjusted_confidence": f"{portfolio.risk_adjusted_confidence:.1%}",
+                "suggested_position_size_multiplier": f"{portfolio.suggested_position_size_multiplier:.2f}x",
+                "portfolio_utilization": f"{portfolio.portfolio_utilization:.1f}%"
+            },
+            
+            # Position details
             "positions": [
                 {
                     "symbol": pos.symbol,
                     "strategy": pos.strategy_type,
                     "pnl": f"${pos.total_pnl:,.2f}",
                     "pnl_pct": f"{pos.pnl_percentage:+.1f}%",
-                    "days_held": pos.days_held
+                    "days_held": pos.days_held,
+                    "entry_cost": f"${pos.entry_cost:,.2f}",
+                    "current_value": f"${pos.current_value:,.2f}"
                 }
                 for pos in positions
             ],
@@ -223,47 +294,55 @@ class EmailService:
         if self.claude_service:
             try:
                 prompt = f"""
-                Create a comprehensive, beautiful HTML email report for end-of-day trading performance.
+                Create a professional HTML email report for end-of-day trading performance.
                 
-                Data to include:
-                {report_data}
+                CRITICAL REQUIREMENTS:
+                1. Always include POSITION PERFORMANCE table with every position
+                2. Always include performance streak and trajectory information
+                3. Use proper HTML structure with inline CSS
+                4. Make it visually appealing with color coding
                 
-                The report should be:
-                1. Professional financial report style with clean layout
-                2. Color-coded performance metrics (green gains, red losses)
-                3. Clear position breakdown with key metrics
-                4. Performance attribution analysis
-                5. Tomorrow's outlook section
+                Data to format:
+                Portfolio: {report_data['portfolio_value']} total, P&L: {report_data['total_pnl']}
+                Daily: {report_data['daily_pnl']} ({report_data['daily_pnl_pct']})
+                Streak: {report_data['performance_history']['current_streak']} ({report_data['performance_history']['streak_type']})
                 
-                Sections to include:
-                - Header with date and daily performance
-                - Portfolio summary with key metrics
-                - Individual position performance table
-                - Today's trades summary
-                - Risk analysis
-                - Tomorrow's action items
-                - Claude's market outlook
+                Positions to display:
+                {report_data['positions']}
                 
-                Generate complete HTML with inline CSS. Make it comprehensive but easy to read.
+                Performance History:
+                7d: {report_data['performance_history']['last_7_days_pnl']}
+                30d: {report_data['performance_history']['last_30_days_pnl']}
+                Win Rate: {report_data['win_rate']} (recent: {report_data['performance_history']['recent_win_rate']})
+                
+                Create a complete HTML email that shows:
+                - Header with today's performance
+                - Performance streak with emojis (🔥 for wins, ❄️ for losses)  
+                - INDIVIDUAL POSITION PERFORMANCE table with all positions
+                - Performance trajectory metrics
+                - Tomorrow's outlook based on current streak
+                
+                Return only the complete HTML code.
                 """
                 
+                logger.info(f"📧 Generating evening HTML report with {len(report_data['positions'])} positions")
                 claude_html = await self.claude_service._query_claude(prompt, "email_report")
                 
-                if "<html>" in claude_html.lower():
-                    return claude_html
+                # Validate Claude response
+                if claude_html and len(claude_html.strip()) > 100:
+                    if "<html>" in claude_html.lower() or "<div>" in claude_html.lower():
+                        logger.info("📧 ✅ Claude evening HTML generation successful")
+                        return self._wrap_html_if_needed(claude_html)
+                    else:
+                        logger.warning("📧 ⚠️ Claude evening response missing HTML structure, using fallback")
                 else:
-                    return f"""
-                    <html>
-                    <head><title>Evening Performance Report</title></head>
-                    <body style="font-family: Arial, sans-serif; margin: 20px;">
-                    {claude_html}
-                    </body>
-                    </html>
-                    """
+                    logger.warning(f"📧 ⚠️ Claude evening response too short ({len(claude_html) if claude_html else 0} chars), using fallback")
                     
             except Exception as e:
-                logger.warning(f"Claude HTML generation failed: {e}, using fallback template")
+                logger.error(f"📧 ❌ Claude evening HTML generation failed: {e}, using fallback template")
         
+        # Always use fallback template to ensure content is displayed
+        logger.info("📧 Using enhanced evening fallback template")
         return self._fallback_evening_template(report_data)
     
     async def _generate_trade_alert_html(self, position: OptionsPosition, action: str, reason: str) -> str:
@@ -290,17 +369,74 @@ class EmailService:
         """
     
     def _fallback_morning_template(self, data: Dict) -> str:
-        """Fallback morning report template"""
+        """Fallback morning report template with enhanced performance tracking - ALWAYS shows opportunities"""
         
-        opportunities_html = ""
-        for opp in data["opportunities"]:
-            opportunities_html += f"""
+        # CRITICAL: Always show opportunities section
+        if not data.get("opportunities"):
+            opportunities_html = """
             <tr>
-                <td>{opp.get('symbol', 'N/A')}</td>
-                <td>{opp.get('strategy_type', 'N/A')}</td>
-                <td>{opp.get('confidence', 0):.0%}</td>
-                <td>${opp.get('target_return', 0):.2f}</td>
-                <td>{opp.get('time_horizon', 0)} days</td>
+                <td colspan="5" style="text-align: center; padding: 20px; color: #e74c3c; font-weight: bold;">
+                    ⚠️ NO TRADING OPPORTUNITIES TODAY ⚠️<br>
+                    Claude recommends holding cash based on current market conditions and performance metrics.
+                </td>
+            </tr>
+            """
+        else:
+            opportunities_html = ""
+            for i, opp in enumerate(data["opportunities"], 1):
+                symbol = opp.get('symbol', 'N/A')
+                strategy = opp.get('strategy_type', opp.get('strategy', 'N/A'))
+                confidence = opp.get('confidence', 0)
+                target_return = opp.get('target_return', 0)
+                time_horizon = opp.get('time_horizon', opp.get('time_horizon_days', 0))
+                rationale = opp.get('rationale', opp.get('reasoning', 'No rationale provided'))
+                
+                opportunities_html += f"""
+                <tr style="background: {'#f8f9fa' if i % 2 == 0 else 'white'};">
+                    <td style="padding: 12px; font-weight: bold; color: #2c3e50;">{symbol}</td>
+                    <td style="padding: 12px;">{strategy.replace('_', ' ').title()}</td>
+                    <td style="padding: 12px; font-weight: bold; color: #27ae60;">{confidence:.0%}</td>
+                    <td style="padding: 12px; color: #f39c12; font-weight: bold;">${target_return:.0f}</td>
+                    <td style="padding: 12px;">{time_horizon} days</td>
+                </tr>
+                <tr style="background: #f1f2f6;">
+                    <td colspan="5" style="padding: 8px 12px; font-size: 14px; color: #555;">
+                        <strong>Rationale:</strong> {rationale[:150]}{'...' if len(rationale) > 150 else ''}
+                    </td>
+                </tr>
+                """
+        
+        # Performance streak indicators
+        streak = data["performance_history"]["current_streak"]
+        if streak > 0:
+            streak_display = f"🔥 {streak} Win Streak"
+            streak_color = "#27ae60"
+        elif streak < 0:
+            streak_display = f"❄️ {abs(streak)} Loss Streak"
+            streak_color = "#e74c3c"
+        else:
+            streak_display = "➡️ No Active Streak"
+            streak_color = "#95a5a6"
+            
+        # Risk level color coding
+        risk_level = data["risk_assessment"]["current_risk_level"]
+        risk_colors = {
+            "very_conservative": "#e74c3c",
+            "conservative": "#f39c12", 
+            "normal": "#27ae60",
+            "moderate_aggressive": "#8e44ad",
+            "aggressive": "#9b59b6"
+        }
+        risk_color = risk_colors.get(risk_level, "#95a5a6")
+        
+        # Strategy performance breakdown
+        strategy_html = ""
+        for strategy, pnl in data["performance_history"]["strategy_performance"].items():
+            color = "#27ae60" if pnl >= 0 else "#e74c3c"
+            strategy_html += f"""
+            <tr>
+                <td>{strategy.replace('_', ' ').title()}</td>
+                <td style="color: {color};">${pnl:,.0f}</td>
             </tr>
             """
         
@@ -308,27 +444,47 @@ class EmailService:
         <html>
         <head><title>Morning Trading Report</title></head>
         <body style="font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5;">
-            <div style="max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <div style="max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
                 <h1 style="color: #2c3e50; text-align: center; margin-bottom: 30px;">🌅 Morning Trading Report</h1>
                 <p style="text-align: center; color: #7f8c8d; font-size: 18px;">{data['date']}</p>
                 
-                <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h2 style="color: #34495e; margin-top: 0;">📊 Portfolio Snapshot</h2>
-                    <p><strong>Total Value:</strong> {data['portfolio_value']}</p>
-                    <p><strong>Cash Balance:</strong> {data['cash_balance']}</p>
-                    <p><strong>Open Positions:</strong> {data['open_positions']}</p>
+                <!-- Performance Trajectory Section -->
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 10px; margin: 20px 0;">
+                    <h2 style="margin-top: 0; font-size: 24px;">📈 Performance Trajectory</h2>
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
+                        <div style="text-align: center; margin: 10px;">
+                            <h3 style="margin: 5px 0; color: {streak_color};">{streak_display}</h3>
+                            <p style="margin: 0; opacity: 0.9;">Current Streak</p>
+                        </div>
+                        <div style="text-align: center; margin: 10px;">
+                            <h3 style="margin: 5px 0;">{data['performance_history']['last_7_days_pnl']}</h3>
+                            <p style="margin: 0; opacity: 0.9;">7-Day P&L</p>
+                        </div>
+                        <div style="text-align: center; margin: 10px;">
+                            <h3 style="margin: 5px 0;">{data['performance_history']['last_30_days_pnl']}</h3>
+                            <p style="margin: 0; opacity: 0.9;">30-Day P&L</p>
+                        </div>
+                        <div style="text-align: center; margin: 10px;">
+                            <h3 style="margin: 5px 0;">{data['performance_history']['recent_win_rate']}</h3>
+                            <p style="margin: 0; opacity: 0.9;">Recent Win Rate</p>
+                        </div>
+                    </div>
                 </div>
                 
-                <div style="margin: 30px 0;">
-                    <h2 style="color: #34495e;">🎯 Today's Opportunities</h2>
-                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                <!-- Today's Opportunities -->
+                <div style="background: #fff3cd; border: 2px solid #ffc107; padding: 25px; border-radius: 10px; margin: 20px 0;">
+                    <h2 style="color: #d68910; margin-top: 0; font-size: 24px;">🎯 TODAY'S TRADING OPPORTUNITIES</h2>
+                    <p style="color: #856404; margin-bottom: 20px; font-size: 16px;">
+                        <strong>Action Required:</strong> Review and execute the following positions based on Claude's analysis.
+                    </p>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
                         <thead>
-                            <tr style="background: #3498db; color: white;">
-                                <th style="padding: 12px; text-align: left;">Symbol</th>
-                                <th style="padding: 12px; text-align: left;">Strategy</th>
-                                <th style="padding: 12px; text-align: left;">Confidence</th>
-                                <th style="padding: 12px; text-align: left;">Target Return</th>
-                                <th style="padding: 12px; text-align: left;">Time Horizon</th>
+                            <tr style="background: #007bff; color: white;">
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">📈 Symbol</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">🎯 Strategy</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">🎲 Confidence</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">💰 Target Return</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">⏰ Time Horizon</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -337,8 +493,61 @@ class EmailService:
                     </table>
                 </div>
                 
+                <!-- Risk Assessment Section -->
+                <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h2 style="color: #34495e; margin-top: 0;">⚖️ Adaptive Risk Assessment</h2>
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center;">
+                        <div>
+                            <p><strong>Risk Level:</strong> 
+                                <span style="background: {risk_color}; color: white; padding: 5px 10px; border-radius: 15px; font-weight: bold;">
+                                    {risk_level.replace('_', ' ').title()}
+                                </span>
+                            </p>
+                            <p><strong>Confidence:</strong> {data['risk_assessment']['risk_adjusted_confidence']}</p>
+                            <p><strong>Position Size Multiplier:</strong> {data['risk_assessment']['suggested_position_size_multiplier']}</p>
+                        </div>
+                        <div>
+                            <p><strong>Performance Trend:</strong> {data['performance_history']['performance_trend']}</p>
+                            <p><strong>Portfolio Utilization:</strong> {data['risk_assessment']['portfolio_utilization']}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Portfolio Snapshot -->
                 <div style="background: #e8f5e8; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h2 style="color: #27ae60; margin-top: 0;">🤖 Claude's Analysis</h2>
+                    <h2 style="color: #27ae60; margin-top: 0;">📊 Portfolio Snapshot</h2>
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
+                        <div>
+                            <p><strong>Total Value:</strong> {data['portfolio_value']}</p>
+                            <p><strong>Cash Balance:</strong> {data['cash_balance']}</p>
+                        </div>
+                        <div>
+                            <p><strong>Total P&L:</strong> {data['total_pnl']}</p>
+                            <p><strong>Open Positions:</strong> {data['open_positions']}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Strategy Performance Breakdown -->
+                {f'''
+                <div style="margin: 30px 0;">
+                    <h2 style="color: #34495e;">🎯 Strategy Performance</h2>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                        <thead>
+                            <tr style="background: #8e44ad; color: white;">
+                                <th style="padding: 12px; text-align: left;">Strategy</th>
+                                <th style="padding: 12px; text-align: left;">Total P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {strategy_html}
+                        </tbody>
+                    </table>
+                </div>
+                ''' if strategy_html else ''}
+                
+                <div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h2 style="color: #d68910; margin-top: 0;">🤖 Claude's Analysis</h2>
                     <p style="line-height: 1.6;">{data['claude_analysis'][:500]}...</p>
                 </div>
                 
@@ -351,55 +560,222 @@ class EmailService:
         """
     
     def _fallback_evening_template(self, data: Dict) -> str:
-        """Fallback evening report template"""
+        """Fallback evening report template with enhanced performance tracking - ALWAYS shows positions"""
         
-        positions_html = ""
-        for pos in data["positions"]:
-            pnl_color = "#27ae60" if "+" in pos["pnl_pct"] else "#e74c3c"
-            positions_html += f"""
+        # CRITICAL: Always show positions section  
+        if not data.get("positions"):
+            positions_html = """
             <tr>
-                <td>{pos['symbol']}</td>
-                <td>{pos['strategy']}</td>
-                <td style="color: {pnl_color};">{pos['pnl']}</td>
-                <td style="color: {pnl_color};">{pos['pnl_pct']}</td>
-                <td>{pos['days_held']}</td>
+                <td colspan="7" style="text-align: center; padding: 20px; color: #f39c12; font-weight: bold;">
+                    📭 NO OPEN POSITIONS<br>
+                    All positions have been closed or no trades were executed today.
+                </td>
             </tr>
             """
+        else:
+            positions_html = ""
+            for i, pos in enumerate(data["positions"], 1):
+                symbol = pos.get('symbol', 'N/A')
+                strategy = pos.get('strategy', 'N/A')
+                entry_cost = pos.get('entry_cost', 'N/A')
+                current_value = pos.get('current_value', 'N/A')
+                pnl = pos.get('pnl', '$0.00')
+                pnl_pct = pos.get('pnl_pct', '0.0%')
+                days_held = pos.get('days_held', 0)
+                
+                pnl_color = "#27ae60" if "+" in str(pnl_pct) else "#e74c3c" if "-" in str(pnl_pct) else "#95a5a6"
+                
+                positions_html += f"""
+                <tr style="background: {'#f8f9fa' if i % 2 == 0 else 'white'};">
+                    <td style="padding: 12px; font-weight: bold; color: #2c3e50;">{symbol}</td>
+                    <td style="padding: 12px;">{strategy.replace('_', ' ').title()}</td>
+                    <td style="padding: 12px;">{entry_cost}</td>
+                    <td style="padding: 12px;">{current_value}</td>
+                    <td style="padding: 12px; color: {pnl_color}; font-weight: bold;">{pnl}</td>
+                    <td style="padding: 12px; color: {pnl_color}; font-weight: bold;">{pnl_pct}</td>
+                    <td style="padding: 12px; text-align: center;">{days_held}</td>
+                </tr>
+                """
         
+        # Performance streak indicators
+        streak = data["performance_history"]["current_streak"]
+        if streak > 0:
+            streak_display = f"🔥 {streak} Win{'s' if streak > 1 else ''}"
+            streak_color = "#27ae60"
+            streak_bg = "#d5f4e6"
+        elif streak < 0:
+            streak_display = f"❄️ {abs(streak)} Loss{'es' if abs(streak) > 1 else ''}"
+            streak_color = "#e74c3c"
+            streak_bg = "#fdf2f2"
+        else:
+            streak_display = "➡️ No Streak"
+            streak_color = "#95a5a6"
+            streak_bg = "#f8f9fa"
+            
+        # Risk level styling
+        risk_level = data["risk_assessment"]["current_risk_level"]
+        risk_colors = {
+            "very_conservative": "#e74c3c",
+            "conservative": "#f39c12", 
+            "normal": "#27ae60",
+            "moderate_aggressive": "#8e44ad",
+            "aggressive": "#9b59b6"
+        }
+        risk_color = risk_colors.get(risk_level, "#95a5a6")
+        
+        # Daily P&L color
         daily_color = "#27ae60" if "+" in data["daily_pnl_pct"] else "#e74c3c"
+        
+        # Strategy performance breakdown
+        strategy_html = ""
+        for strategy, pnl in data["performance_history"]["strategy_performance"].items():
+            color = "#27ae60" if pnl >= 0 else "#e74c3c"
+            strategy_html += f"""
+            <tr>
+                <td>{strategy.replace('_', ' ').title()}</td>
+                <td style="color: {color}; font-weight: bold;">${pnl:,.0f}</td>
+            </tr>
+            """
         
         return f"""
         <html>
         <head><title>Evening Performance Report</title></head>
         <body style="font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5;">
-            <div style="max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <div style="max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
                 <h1 style="color: #2c3e50; text-align: center; margin-bottom: 30px;">🌆 Evening Performance Report</h1>
                 <p style="text-align: center; color: #7f8c8d; font-size: 18px;">{data['date']}</p>
                 
-                <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h2 style="color: #34495e; margin-top: 0;">📈 Daily Performance</h2>
-                    <p><strong>Portfolio Value:</strong> {data['portfolio_value']}</p>
-                    <p><strong>Daily P&L:</strong> <span style="color: {daily_color};">{data['daily_pnl']} ({data['daily_pnl_pct']})</span></p>
-                    <p><strong>Total P&L:</strong> {data['total_pnl']}</p>
-                    <p><strong>Win Rate:</strong> {data['win_rate']}</p>
+                <!-- Daily Performance Header -->
+                <div style="background: linear-gradient(135deg, #ff7675 0%, #fd79a8 100%); color: white; padding: 25px; border-radius: 10px; margin: 20px 0; text-align: center;">
+                    <h2 style="margin-top: 0; font-size: 28px;">Today's Performance</h2>
+                    <div style="display: flex; justify-content: center; align-items: center; flex-wrap: wrap;">
+                        <div style="margin: 0 20px;">
+                            <h3 style="margin: 5px 0; font-size: 32px;">{data['daily_pnl']}</h3>
+                            <p style="margin: 0; opacity: 0.9; font-size: 18px;">Daily P&L ({data['daily_pnl_pct']})</p>
+                        </div>
+                    </div>
                 </div>
                 
+                <!-- Performance Trajectory Analysis -->
+                <div style="background: {streak_bg}; border-left: 5px solid {streak_color}; padding: 20px; margin: 20px 0;">
+                    <h2 style="color: #2c3e50; margin-top: 0;">📈 Performance Trajectory</h2>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 15px;">
+                        <div style="text-align: center; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 5px 0; color: {streak_color}; font-size: 18px;">{streak_display}</h3>
+                            <p style="margin: 0; color: #7f8c8d;">Current Streak</p>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 5px 0; font-size: 18px;">{data['performance_history']['last_7_days_pnl']}</h3>
+                            <p style="margin: 0; color: #7f8c8d;">7-Day P&L</p>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 5px 0; font-size: 18px;">{data['performance_history']['last_30_days_pnl']}</h3>
+                            <p style="margin: 0; color: #7f8c8d;">30-Day P&L</p>
+                        </div>
+                        <div style="text-align: center; padding: 15px; background: white; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                            <h3 style="margin: 5px 0; font-size: 18px;">{data['performance_history']['recent_win_rate']}</h3>
+                            <p style="margin: 0; color: #7f8c8d;">Recent Win Rate</p>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 20px; display: flex; justify-content: space-between; flex-wrap: wrap;">
+                        <div>
+                            <p><strong>Performance Trend:</strong> <span style="font-size: 16px;">{data['performance_history']['performance_trend']}</span></p>
+                            <p><strong>Consecutive Losses:</strong> {data['performance_history']['consecutive_losses']}</p>
+                        </div>
+                        <div>
+                            <p><strong>Days Since Last Win:</strong> {data['performance_history']['days_since_last_win']}</p>
+                            <p><strong>Overall Win Rate:</strong> {data['win_rate']}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Risk & Confidence Assessment -->
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h2 style="color: #34495e; margin-top: 0;">⚖️ Risk & Confidence Assessment</h2>
+                    <div style="display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center;">
+                        <div>
+                            <p><strong>Current Risk Level:</strong> 
+                                <span style="background: {risk_color}; color: white; padding: 8px 15px; border-radius: 20px; font-weight: bold; font-size: 14px;">
+                                    {risk_level.replace('_', ' ').title()}
+                                </span>
+                            </p>
+                            <p><strong>Risk-Adjusted Confidence:</strong> {data['risk_assessment']['risk_adjusted_confidence']}</p>
+                        </div>
+                        <div>
+                            <p><strong>Position Size Multiplier:</strong> {data['risk_assessment']['suggested_position_size_multiplier']}</p>
+                            <p><strong>Portfolio Utilization:</strong> {data['risk_assessment']['portfolio_utilization']}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Portfolio Summary -->
+                <div style="background: #ecf0f1; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h2 style="color: #34495e; margin-top: 0;">📊 Portfolio Summary</h2>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <p><strong>Portfolio Value:</strong> {data['portfolio_value']}</p>
+                            <p><strong>Total P&L:</strong> {data['total_pnl']}</p>
+                        </div>
+                        <div>
+                            <p><strong>Open Positions:</strong> {data['open_positions']}</p>
+                            <p><strong>Max Drawdown:</strong> {data['max_drawdown']}</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Strategy Performance Breakdown -->
+                {f'''
                 <div style="margin: 30px 0;">
-                    <h2 style="color: #34495e;">📋 Position Summary</h2>
+                    <h2 style="color: #34495e;">🎯 Strategy Performance</h2>
                     <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
                         <thead>
-                            <tr style="background: #e67e22; color: white;">
-                                <th style="padding: 12px; text-align: left;">Symbol</th>
-                                <th style="padding: 12px; text-align: left;">Strategy</th>
-                                <th style="padding: 12px; text-align: left;">P&L</th>
-                                <th style="padding: 12px; text-align: left;">P&L %</th>
-                                <th style="padding: 12px; text-align: left;">Days Held</th>
+                            <tr style="background: #8e44ad; color: white;">
+                                <th style="padding: 12px; text-align: left;">Strategy Type</th>
+                                <th style="padding: 12px; text-align: left;">Total P&L</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {strategy_html}
+                        </tbody>
+                    </table>
+                </div>
+                ''' if strategy_html else ''}
+                
+                <!-- Position Details -->
+                <div style="background: #e8f5e8; border: 2px solid #28a745; padding: 25px; border-radius: 10px; margin: 20px 0;">
+                    <h2 style="color: #155724; margin-top: 0; font-size: 24px;">📋 INDIVIDUAL POSITION PERFORMANCE</h2>
+                    <p style="color: #155724; margin-bottom: 20px; font-size: 16px;">
+                        <strong>Portfolio Analysis:</strong> Current open positions and their performance metrics.
+                    </p>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+                        <thead>
+                            <tr style="background: #17a2b8; color: white;">
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">📈 Symbol</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">🎯 Strategy</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">💵 Entry Cost</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">💎 Current Value</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">💰 P&L</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">📊 P&L %</th>
+                                <th style="padding: 15px; text-align: left; font-size: 14px;">⏱️ Days Held</th>
                             </tr>
                         </thead>
                         <tbody>
                             {positions_html}
                         </tbody>
                     </table>
+                </div>
+                
+                <!-- Tomorrow's Outlook -->
+                <div style="background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <h2 style="margin-top: 0;">🔮 Tomorrow's Strategy Outlook</h2>
+                    <p style="line-height: 1.6; margin: 0;">
+                        Based on today's performance and current streak status, tomorrow's risk level will be 
+                        <strong>{risk_level.replace('_', ' ')}</strong> with 
+                        <strong>{data['risk_assessment']['suggested_position_size_multiplier']}</strong> position sizing.
+                        Claude will {'increase aggressiveness' if 'aggressive' in risk_level else 'maintain caution' if 'conservative' in risk_level else 'continue normal operations'} 
+                        based on the current trajectory.
+                    </p>
                 </div>
                 
                 <div style="background: #fdf2e9; padding: 20px; border-radius: 8px; margin: 20px 0;">
