@@ -27,11 +27,9 @@ async def get_conversations():
 async def test_claude_json():
     """Test Claude's JSON response parsing"""
     try:
-        # Import the global claude_service
-        from main import claude_service
-        
-        if claude_service is None:
-            raise HTTPException(status_code=503, detail="Claude service not initialized")
+        # Initialize Claude service
+        from src.services.claude_service import ClaudeService
+        claude_service = ClaudeService()
         
         result = await claude_service.test_json_response()
         

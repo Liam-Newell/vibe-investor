@@ -88,6 +88,8 @@ curl -X POST http://localhost:8080/api/v1/email/test-morning-email
 
 # Check system health
 curl http://localhost:8080/health
+
+
 ```
 
 ## ✅ Achieved Goals
