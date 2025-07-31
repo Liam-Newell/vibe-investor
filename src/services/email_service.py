@@ -119,6 +119,87 @@ class EmailService:
             logger.error(f"📧 ❌ Trade alert error: {e}")
             return False
     
+    async def send_position_exit_notification(self, closed_positions: List, total_pnl: float, portfolio_summary) -> bool:
+        """Send notification when positions are automatically closed"""
+        
+        if not self.smtp_config["enabled"]:
+            logger.info("📧 Email disabled - Exit notification not sent")
+            return False
+            
+        try:
+            # Generate exit notification email
+            html_content = await self._generate_exit_notification_html(
+                closed_positions, total_pnl, portfolio_summary
+            )
+            
+            subject = f"🎯 Position Exits: {len(closed_positions)} positions closed (${total_pnl:+,.0f})"
+            
+            success = await self._send_email(
+                to_email="liam-newell@hotmail.com",
+                subject=subject,
+                html_content=html_content
+            )
+            
+            if success:
+                logger.info("📧 ✅ Exit notification sent successfully")
+            else:
+                logger.error("📧 ❌ Failed to send exit notification")
+                
+            return success
+            
+        except Exception as e:
+            logger.error(f"📧 ❌ Exit notification error: {e}")
+            return False
+
+    async def _generate_exit_notification_html(self, closed_positions: List, total_pnl: float, portfolio_summary) -> str:
+        """Generate HTML for position exit notification"""
+        
+        positions_html = ""
+        for pos_data in closed_positions:
+            positions_html += f"""
+            <tr>
+                <td>{pos_data['symbol']}</td>
+                <td>{pos_data['strategy_type']}</td>
+                <td>${pos_data['realized_pnl']:+,.2f}</td>
+                <td>{pos_data['reason']}</td>
+                <td>{pos_data['days_held']} days</td>
+            </tr>
+            """
+        
+        pnl_color = "green" if total_pnl >= 0 else "red"
+        
+        return f"""
+        <html>
+        <head><title>Position Exit Notification</title></head>
+        <body style="font-family: Arial, sans-serif; margin: 20px;">
+            <h2>🎯 Position Exit Notification</h2>
+            <p><strong>Date:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+            
+            <h3>Summary</h3>
+            <ul>
+                <li><strong>Positions Closed:</strong> {len(closed_positions)}</li>
+                <li><strong>Total P&L:</strong> <span style="color: {pnl_color};">${total_pnl:+,.2f}</span></li>
+                <li><strong>Portfolio Value:</strong> ${portfolio_summary.total_value:,.2f}</li>
+                <li><strong>Cash Balance:</strong> ${portfolio_summary.cash_balance:,.2f}</li>
+            </ul>
+            
+            <h3>Closed Positions</h3>
+            <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse;">
+                <tr style="background-color: #f0f0f0;">
+                    <th>Symbol</th>
+                    <th>Strategy</th>
+                    <th>P&L</th>
+                    <th>Exit Reason</th>
+                    <th>Days Held</th>
+                </tr>
+                {positions_html}
+            </table>
+            
+            <p><em>This is an automated notification from Vibe Investor.</em></p>
+        </body>
+        </html>
+        """
+    
     async def _generate_morning_report_html(self,
                                           opportunities: List[Dict],
                                           portfolio: PortfolioSummary,

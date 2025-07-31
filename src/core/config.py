@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     CLAUDE_MORNING_ENABLED: bool = Field(True, description="Enable morning Claude strategy session")
     CLAUDE_EVENING_ENABLED: bool = Field(True, description="Enable evening Claude review session")
     CLAUDE_MAX_DAILY_QUERIES: int = Field(10, description="Maximum Claude queries per day")
-    CLAUDE_MORNING_TIME: str = Field("09:45", description="Morning session time (HH:MM) - 15 min after market open for real price data")
+    CLAUDE_MORNING_TIME: str = Field("09:46", description="Morning session time (HH:MM) - offset to avoid market data scheduling conflicts")
     CLAUDE_EVENING_TIME: str = Field("17:00", description="Evening session time (HH:MM)")
     
     # Trading Strategy Configuration

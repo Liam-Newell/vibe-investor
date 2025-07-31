@@ -175,6 +175,34 @@
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
         
+        .reset-btn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-weight: 600;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-left: 15px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .reset-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(245, 87, 108, 0.3);
+        }
+        
+        .reset-btn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
         .loading {
             opacity: 0.6;
             pointer-events: none;
@@ -372,7 +400,8 @@
                 Last Updated: <span id="lastUpdated">{{ data.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span>
             </div>
             <button class="refresh-btn" onclick="refreshData()">🔄 Refresh Live Data</button>
-            <button class="strategy-btn" onclick="runMorningStrategy()">🌅 Run Claude Strategy</button>
+                            <button class="strategy-btn" onclick="runMorningStrategy()">🌅 Run Claude Strategy</button>
+                <button class="reset-btn" onclick="resetPortfolio()">🔄 Reset Portfolio</button>
         </div>
         
         <div class="status-indicators">
@@ -865,6 +894,68 @@
             } finally {
                 button.disabled = false;
                 button.textContent = originalText;
+            }
+        }
+        
+        async function resetPortfolio() {
+            // Confirm reset with detailed warning
+            const confirmed = confirm(`⚠️ PORTFOLIO RESET WARNING ⚠️
+
+This will:
+• Clear ALL positions from your portfolio
+• Reset cash balance to $100,000
+• Mark all trades as 'reset' in database
+
+This action cannot be undone!
+
+Are you sure you want to continue?`);
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            try {
+                // Show loading state
+                const button = document.querySelector('.reset-btn');
+                const originalText = button.textContent;
+                button.textContent = '🔄 Resetting...';
+                button.disabled = true;
+                
+                const response = await fetch('/api/v1/trading/reset-portfolio', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Show success message
+                    alert(`✅ Portfolio Reset Successful!
+
+${result.message}
+
+Details:
+• Positions Cleared: ${result.reset_details.cleared_positions}
+• Previous Cash: $${result.reset_details.previous_cash.toLocaleString()}
+• New Cash: $${result.reset_details.new_cash.toLocaleString()}
+
+Dashboard will refresh automatically.`);
+                    
+                    // Refresh dashboard data immediately
+                    refreshData();
+                } else {
+                    alert(`❌ Portfolio reset failed: ${result.message || 'Unknown error'}`);
+                }
+                
+            } catch (error) {
+                alert(`❌ Failed to reset portfolio: ${error.message}`);
+            } finally {
+                // Reset button
+                const button = document.querySelector('.reset-btn');
+                button.textContent = originalText;
+                button.disabled = false;
             }
         }
         

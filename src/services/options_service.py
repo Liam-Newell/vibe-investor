@@ -104,61 +104,65 @@ class OptionsService:
     async def _save_position_to_db(self, position: OptionsPosition):
         """Save position to database"""
         try:
-            db = next(get_db())
-            
-            # Check if position already exists
-            existing = db.query(PositionDB).filter(PositionDB.id == position.id).first()
-            
-            if existing:
-                # Update existing position
-                existing.status = position.status
-                existing.current_value = position.current_value
-                existing.realized_pnl = position.realized_pnl
-                existing.unrealized_pnl = position.unrealized_pnl
-                existing.exit_date = position.exit_date
-                existing.last_claude_check = position.last_claude_check
-                existing.portfolio_delta = position.portfolio_delta
-                existing.portfolio_gamma = position.portfolio_gamma
-                existing.portfolio_theta = position.portfolio_theta
-                existing.portfolio_vega = position.portfolio_vega
-                existing.position_metadata = position.position_metadata
-                logger.info(f"💾 Updated position in database: {position.symbol}")
-            else:
-                # Create new position
-                contracts_data = [contract.dict() for contract in position.contracts]
+            async for db in get_db():
+                # Check if position already exists
+                result = await db.execute(select(PositionDB).where(PositionDB.id == position.id))
+                existing = result.scalar_one_or_none()
                 
-                db_position = PositionDB(
-                    id=position.id,
-                    strategy_type=position.strategy_type.value,
-                    status=position.status,
-                    symbol=position.symbol,
-                    quantity=position.quantity,
-                    entry_date=position.entry_date,
-                    exit_date=position.exit_date,
-                    entry_cost=position.entry_cost,
-                    current_value=position.current_value,
-                    realized_pnl=position.realized_pnl,
-                    unrealized_pnl=position.unrealized_pnl,
-                    claude_conversation_id=position.claude_conversation_id,
-                    last_claude_check=position.last_claude_check,
-                    max_loss=position.max_loss,
-                    profit_target=position.profit_target,
-                    portfolio_delta=position.portfolio_delta,
-                    portfolio_gamma=position.portfolio_gamma,
-                    portfolio_theta=position.portfolio_theta,
-                    portfolio_vega=position.portfolio_vega,
-                    contracts_data=contracts_data,
-                    position_metadata=position.position_metadata
-                )
+                if existing:
+                    # Update existing position
+                    existing.status = position.status
+                    existing.current_value = position.current_value
+                    existing.realized_pnl = position.realized_pnl
+                    existing.unrealized_pnl = position.unrealized_pnl
+                    existing.exit_date = position.exit_date
+                    existing.last_claude_check = position.last_claude_check
+                    existing.portfolio_delta = position.portfolio_delta
+                    existing.portfolio_gamma = position.portfolio_gamma
+                    existing.portfolio_theta = position.portfolio_theta
+                    existing.portfolio_vega = position.portfolio_vega
+                    existing.position_metadata = getattr(position, 'position_metadata', {})
+                    logger.info(f"💾 Updated position in database: {position.symbol}")
+                else:
+                    # Create new position
+                    contracts_data = [contract.dict() for contract in position.contracts]
+                    
+                    db_position = PositionDB(
+                        id=position.id,
+                        strategy_type=position.strategy_type.value,
+                        status=position.status,
+                        symbol=position.symbol,
+                        quantity=position.quantity,
+                        entry_date=position.entry_date,
+                        exit_date=position.exit_date,
+                        entry_cost=position.entry_cost,
+                        current_value=position.current_value,
+                        realized_pnl=position.realized_pnl,
+                        unrealized_pnl=position.unrealized_pnl,
+                        claude_conversation_id=position.claude_conversation_id,
+                        last_claude_check=position.last_claude_check,
+                        max_loss=position.max_loss,
+                        profit_target=position.profit_target,
+                        portfolio_delta=position.portfolio_delta,
+                        portfolio_gamma=position.portfolio_gamma,
+                        portfolio_theta=position.portfolio_theta,
+                        portfolio_vega=position.portfolio_vega,
+                        contracts_data=contracts_data,
+                        position_metadata=getattr(position, 'position_metadata', {})
+                    )
+                    
+                    db.add(db_position)
+                    logger.info(f"💾 Saved new position to database: {position.symbol}")
                 
-                db.add(db_position)
-                logger.info(f"💾 Saved new position to database: {position.symbol}")
-            
-            db.commit()
-            
+                await db.commit()
+                break  # Only need one database session
+                
         except Exception as e:
             logger.error(f"❌ Failed to save position to database: {e}")
-            db.rollback()
+            try:
+                await db.rollback()
+            except:
+                pass
     
     async def _recalculate_portfolio_from_positions(self):
         """Recalculate portfolio value and cash balance from actual positions"""
@@ -300,7 +304,7 @@ class OptionsService:
             recent_win_rate=recent_win_rate,
             performance_trend=trend,
             risk_confidence=max(0.1, min(0.9, 0.5 + (recent_win_rate - 50) / 100)),
-            strategy_performance={}  # TODO: Calculate by strategy type
+            strategy_performance=self._calculate_strategy_performance(closed_positions)
         )
     
     async def enable_paper_trading(self):
@@ -445,12 +449,18 @@ class OptionsService:
         with live option pricing, real Greeks, and market-based position sizing
         """
         try:
-            # Validate opportunity structure
-            required_fields = ['symbol', 'strategy_type', 'confidence', 'target_return', 'max_risk']
+            # Validate opportunity structure with flexible field handling
+            required_fields = ['symbol', 'strategy_type', 'confidence']
             for field in required_fields:
                 if field not in opportunity:
                     logger.error(f"❌ Missing required field '{field}' in opportunity")
                     return None
+            
+            # Handle optional fields with defaults
+            if 'target_return' not in opportunity:
+                opportunity['target_return'] = opportunity.get('profit_target', 500.0)  # Default target
+            if 'max_risk' not in opportunity:
+                opportunity['max_risk'] = opportunity.get('entry_cost', 300.0)  # Default risk
             
             # Extract opportunity details
             symbol = opportunity['symbol']
@@ -571,9 +581,10 @@ class OptionsService:
                         strike = self._find_closest_strike(call_options, underlying_price * 1.05)
                 
                 contracts.append(OptionContract(
+                    symbol=symbol,
                     option_type="call",
-                    strike_price=strike,
-                    expiration_date=expiration_date,
+                    strike=strike,
+                    expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                     quantity=base_contract_count if strategy_type == StrategyType.LONG_CALL else -base_contract_count
                 ))
                 
@@ -594,9 +605,10 @@ class OptionsService:
                         strike = self._find_closest_strike(put_options, underlying_price * 0.95)
                 
                 contracts.append(OptionContract(
+                    symbol=symbol,
                     option_type="put",
-                    strike_price=strike,
-                    expiration_date=expiration_date,
+                    strike=strike,
+                    expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                     quantity=base_contract_count if strategy_type == StrategyType.LONG_PUT else -base_contract_count
                 ))
                 
@@ -608,15 +620,17 @@ class OptionsService:
                 
                 contracts.extend([
                     OptionContract(
+                        symbol=symbol,
                         option_type="call",
-                        strike_price=short_strike,
-                        expiration_date=expiration_date,
+                        strike=short_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=-base_contract_count  # Short
                     ),
                     OptionContract(
+                        symbol=symbol,
                         option_type="call",
-                        strike_price=long_strike,
-                        expiration_date=expiration_date,
+                        strike=long_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=base_contract_count   # Long
                     )
                 ])
@@ -628,15 +642,17 @@ class OptionsService:
                 
                 contracts.extend([
                     OptionContract(
+                        symbol=symbol,
                         option_type="put",
-                        strike_price=short_strike,
-                        expiration_date=expiration_date,
+                        strike=short_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=-base_contract_count  # Short
                     ),
                     OptionContract(
+                        symbol=symbol,
                         option_type="put",
-                        strike_price=long_strike,
-                        expiration_date=expiration_date,
+                        strike=long_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=base_contract_count   # Long
                     )
                 ])
@@ -657,28 +673,32 @@ class OptionsService:
                 contracts.extend([
                     # Short call spread
                     OptionContract(
+                        symbol=symbol,
                         option_type="call",
-                        strike_price=short_call_strike,
-                        expiration_date=expiration_date,
+                        strike=short_call_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=-base_contract_count
                     ),
                     OptionContract(
+                        symbol=symbol,
                         option_type="call",
-                        strike_price=long_call_strike,
-                        expiration_date=expiration_date,
+                        strike=long_call_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=base_contract_count
                     ),
                     # Short put spread
                     OptionContract(
+                        symbol=symbol,
                         option_type="put",
-                        strike_price=short_put_strike,
-                        expiration_date=expiration_date,
+                        strike=short_put_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=-base_contract_count
                     ),
                     OptionContract(
+                        symbol=symbol,
                         option_type="put",
-                        strike_price=long_put_strike,
-                        expiration_date=expiration_date,
+                        strike=long_put_strike,
+                        expiration=expiration_date.date() if hasattr(expiration_date, 'date') else expiration_date,
                         quantity=base_contract_count
                     )
                 ])
@@ -706,6 +726,27 @@ class OptionsService:
                 closest_strike = strike
         
         return closest_strike
+    
+    def _calculate_strategy_performance(self, closed_positions: List[OptionsPosition]) -> Dict[str, Any]:
+        """Calculate performance metrics by strategy type"""
+        strategy_stats = {}
+        
+        for strategy in StrategyType:
+            strategy_positions = [pos for pos in closed_positions if pos.strategy_type == strategy]
+            
+            if strategy_positions:
+                total_pnl = sum(pos.realized_pnl for pos in strategy_positions)
+                win_count = len([pos for pos in strategy_positions if pos.realized_pnl > 0])
+                win_rate = (win_count / len(strategy_positions)) * 100
+                
+                strategy_stats[strategy.value] = {
+                    "total_trades": len(strategy_positions),
+                    "total_pnl": total_pnl,
+                    "win_rate": win_rate,
+                    "avg_pnl": total_pnl / len(strategy_positions)
+                }
+        
+        return strategy_stats
     
     async def _calculate_real_greeks(self, contracts: List[OptionContract], option_chain: Dict[str, Any]) -> Dict[str, float]:
         """Calculate real Greeks from live option chain data"""

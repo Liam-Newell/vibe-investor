@@ -80,6 +80,7 @@ class OptionContract(BaseModel):
     strike: float = Field(..., description="Strike price")
     expiration: date = Field(..., description="Expiration date")
     option_type: OptionType = Field(..., description="Call or Put")
+    quantity: int = Field(1, description="Number of contracts (negative for short positions)")
     
     # Market data
     bid: float = Field(0.0, description="Current bid price")

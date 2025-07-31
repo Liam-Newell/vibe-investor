@@ -1083,8 +1083,72 @@ async def test_web_search_integration():
         logger.error(f"❌ Web search integration test failed: {e}")
         raise HTTPException(status_code=500, detail=f"Web search test failed: {str(e)}")
 
+@router.post("/reset-portfolio")
+async def reset_portfolio():
+    """Reset portfolio to initial state - clear all positions and reset cash balance"""
+    try:
+        logger.info("🔄 Resetting portfolio to initial state...")
+        
+        # Initialize services
+        from src.services.options_service import OptionsService
+        from src.core.database import get_db
+        
+        options_service = OptionsService()
+        await options_service.initialize()
+        
+        # Get current state before reset
+        current_positions = len(options_service.positions)
+        current_cash = options_service.cash_balance
+        current_portfolio_value = options_service.portfolio_value
+        
+        # Clear all positions
+        options_service.positions.clear()
+        
+        # Reset financial values to initial state
+        options_service.cash_balance = 100000.0  # Reset to initial $100k
+        options_service.portfolio_value = 100000.0
+        options_service.daily_trades_count = 0
+        options_service.last_trade_date = None
+        
+        # Clear database positions (optional - keeps history but marks as reset)
+        try:
+            async for db in get_db():
+                from src.models.options import PositionDB
+                from sqlalchemy import update
+                
+                # Mark all positions as 'reset' instead of deleting for audit trail
+                await db.execute(
+                    update(PositionDB).values(status='reset')
+                )
+                await db.commit()
+                break
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to update database positions: {e}")
+        
+        logger.info(f"✅ Portfolio reset complete!")
+        logger.info(f"   🔄 Cleared {current_positions} positions")
+        logger.info(f"   💰 Cash: ${current_cash:,.2f} → $100,000.00")
+        logger.info(f"   📊 Portfolio: ${current_portfolio_value:,.2f} → $100,000.00")
+        
+        return {
+            "success": True,
+            "message": "Portfolio reset to initial state",
+            "reset_details": {
+                "cleared_positions": current_positions,
+                "previous_cash": current_cash,
+                "previous_portfolio_value": current_portfolio_value,
+                "new_cash": options_service.cash_balance,
+                "new_portfolio_value": options_service.portfolio_value
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Portfolio reset failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Portfolio reset failed: {str(e)}")
+
 @router.post("/run-morning-strategy")
 async def run_morning_strategy():
+    """Manually trigger Claude's morning strategy session"""
     """
     🌅 MANUAL MORNING STRATEGY SESSION
     

@@ -47,17 +47,14 @@ class TradingScheduler:
         
         self.scheduler.start()
         
-        # Schedule Claude sessions
+        # Schedule ONLY essential Claude sessions
         await self.schedule_morning_session()
         await self.schedule_evening_session()
         
-        # Schedule position monitoring (every 30 minutes during market hours)
-        await self.schedule_position_monitoring()
+        # REMOVED: Constant market data updates (now on-demand via dashboard)
+        # REMOVED: Constant position monitoring (now on-demand via dashboard)
         
-        # Schedule market data updates (every 5 minutes)
-        await self.schedule_market_data_updates()
-        
-        logger.info("✅ Scheduler started successfully")
+        logger.info("✅ Scheduler started - ESSENTIAL JOBS ONLY (Claude sessions)")
         
     async def stop(self):
         """Stop the scheduler"""
@@ -81,7 +78,10 @@ class TradingScheduler:
             self._morning_session,
             CronTrigger(hour=hour, minute=minute, day_of_week='mon-fri', timezone=timezone),
             id='morning_session',
-            name='Morning Claude Strategy Session'
+            name='Morning Claude Strategy Session',
+            max_instances=1,  # Prevent multiple instances
+            coalesce=True,    # Combine missed executions
+            misfire_grace_time=60  # Allow 60 seconds grace for execution
         )
         
         logger.info(f"📅 Scheduled morning session at {settings.CLAUDE_MORNING_TIME}")
@@ -135,39 +135,41 @@ class TradingScheduler:
             
             logger.info(f"📊 Live market data: SPY ${market_summary.get('spy_price')}, VIX {market_summary.get('vix')}, Sentiment: {market_summary.get('market_sentiment')}")
             
-            # Run Claude morning session with LIVE data - Claude makes ALL decisions
-            logger.info("🤖 Running Claude analysis on live market data...")
+            # Step 3: Run Claude analysis
+            logger.info(f"🤖 [SESSION {session_id}] Step 3: Running Claude analysis...")
+            earnings_calendar = []  # Simplified for now
+            
             strategy_response = await self.claude_service.morning_strategy_session(
                 portfolio=portfolio, 
-                market_data=market_summary,  # Live market data
-                earnings_calendar=earnings_calendar,  # Live earnings data
-                current_positions=positions  # Real positions
+                market_data=market_summary,
+                earnings_calendar=earnings_calendar,
+                current_positions=positions
             )
             
             opportunities = strategy_response.opportunities if hasattr(strategy_response, 'opportunities') else []
-            logger.info(f"🎯 Claude analyzed live market and generated {len(opportunities)} opportunities")
+            logger.info(f"✅ [SESSION {session_id}] Claude generated {len(opportunities)} opportunities")
             
-            # Log Claude's live market assessment
+            # Step 4: Log Claude's assessment
             if hasattr(strategy_response, 'market_assessment'):
                 assessment = strategy_response.market_assessment
-                logger.info(f"📊 Claude's market sentiment: {assessment.overall_sentiment}")
-                logger.info(f"📊 Claude's VIX analysis: {assessment.vix_analysis}")
-                logger.info(f"📊 Claude's sector analysis: {assessment.sector_analysis}")
-                logger.info(f"💰 Claude's cash strategy: {strategy_response.cash_strategy.action}")
+                logger.info(f"📊 [SESSION {session_id}] Claude sentiment: {assessment.overall_sentiment}")
+                if hasattr(strategy_response, 'cash_strategy'):
+                    logger.info(f"💰 [SESSION {session_id}] Cash strategy: {strategy_response.cash_strategy.action}")
             
-            # Filter opportunities using dynamic confidence thresholds (based on live performance)
+            # Step 5: Filter opportunities
+            logger.info(f"🔍 [SESSION {session_id}] Step 5: Filtering {len(opportunities)} opportunities...")
             approved_opportunities = []
             
-            for opportunity in opportunities:
-                # Convert opportunity to dict format if needed
+            for i, opportunity in enumerate(opportunities):
                 opp_dict = opportunity.dict() if hasattr(opportunity, 'dict') else opportunity
+                symbol = opp_dict.get('symbol', f'Unknown_{i}')
+                confidence = opp_dict.get('confidence', 0)
                 
-                # Check if opportunity meets dynamic thresholds based on REAL performance
                 if self.portfolio_service.should_execute_opportunity(opp_dict, portfolio):
                     approved_opportunities.append(opp_dict)
-                    logger.info(f"✅ Approved by dynamic filter: {opp_dict.get('symbol')} {opp_dict.get('strategy_type')} ({opp_dict.get('confidence', 0):.1%})")
+                    logger.info(f"✅ [SESSION {session_id}] Approved: {symbol} ({confidence:.1%})")
                 else:
-                    logger.info(f"❌ Rejected by dynamic filter: {opp_dict.get('symbol')} {opp_dict.get('strategy_type')} ({opp_dict.get('confidence', 0):.1%})")
+                    logger.info(f"❌ [SESSION {session_id}] Rejected: {symbol} ({confidence:.1%})")
             
             # Execute approved opportunities automatically (REAL trades in paper account)
             executed_position_ids = []
@@ -309,7 +311,8 @@ class TradingScheduler:
         except Exception as e:
             logger.error(f"❌ Evening session failed: {e}")
             
-    async def schedule_position_monitoring(self):
+    # REMOVED: Position monitoring now on-demand via dashboard
+    async def _schedule_position_monitoring_DISABLED(self):
         """Schedule regular position monitoring and exit decisions"""
         if not settings.CLAUDE_API_KEY:
             logger.warning("⚠️ Claude API not configured, skipping position monitoring")
@@ -331,38 +334,13 @@ class TradingScheduler:
         
         logger.info("📅 Scheduled position monitoring every 30 minutes during market hours")
     
-    async def schedule_market_data_updates(self):
-        """Schedule regular market data updates"""
-        # Update market data every 5 minutes during market hours
-        timezone = pytz.timezone(settings.TIMEZONE)
-        self.scheduler.add_job(
-            self._update_market_data,
-            CronTrigger(
-                minute='*/5',
-                hour='9-16',
-                day_of_week='mon-fri',
-                timezone=timezone
-            ),
-            id='market_data_updates',
-            name='Market Data Updates'
-        )
-        
-        # Update position values every 15 minutes during market hours
-        self.scheduler.add_job(
-            self._update_position_values,
-            CronTrigger(
-                minute='*/15',
-                hour='9-16',
-                day_of_week='mon-fri',
-                timezone=timezone
-            ),
-            id='position_value_updates',
-            name='Position Value Updates'
-        )
-        
-        logger.info("📅 Scheduled market data updates every 5 minutes and position updates every 15 minutes")
+    # REMOVED: Market data updates now on-demand via dashboard
+    async def _schedule_market_data_updates_DISABLED(self):
+        """DISABLED: Market data updates now handled on-demand via dashboard refresh"""
+        logger.info("📅 Market data updates DISABLED - now on-demand via dashboard")
     
-    async def _monitor_positions(self):
+    # DISABLED: Position monitoring now on-demand via dashboard  
+    async def _monitor_positions_DISABLED(self):
         """Monitor positions and make exit decisions"""
         try:
             logger.info("🔍 Starting position monitoring session")
@@ -550,13 +528,23 @@ class TradingScheduler:
             
             subject = f"🎯 Position Exits: {len(closed_positions)} positions closed (${total_pnl:+,.0f})"
             
-            # TODO: Implement exit notification email template
-            logger.info(f"📧 Exit notification: {subject}")
+            # Send exit notification email
+            try:
+                await self.email_service.send_position_exit_notification(
+                    closed_positions=closed_positions,
+                    total_pnl=total_pnl,
+                    portfolio_summary=portfolio
+                )
+                logger.info(f"📧 Exit notification sent: {subject}")
+            except Exception as email_error:
+                logger.warning(f"📧 Failed to send exit email: {email_error}")
+                logger.info(f"📧 Exit notification: {subject}")
             
         except Exception as e:
             logger.error(f"❌ Failed to send exit notification: {e}")
     
-    async def _update_market_data(self):
+    # DISABLED: Market data updates now on-demand via dashboard
+    async def _update_market_data_DISABLED(self):
         """Update market data for all tracked symbols"""
         try:
             await self.market_data_service.update_all_cached_data()
@@ -564,7 +552,8 @@ class TradingScheduler:
         except Exception as e:
             logger.error(f"❌ Failed to update market data: {e}")
     
-    async def _update_position_values(self):
+    # DISABLED: Position value updates now on-demand via dashboard  
+    async def _update_position_values_DISABLED(self):
         """Update all position values using current market data"""
         try:
             await self.options_service.update_position_values()
