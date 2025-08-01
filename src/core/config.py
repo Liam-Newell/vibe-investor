@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     SMA_LONG: int = Field(50, description="Long-term moving average")
     
     # Email Notifications
-    EMAIL_ENABLED: bool = Field(False, description="Enable email notifications")
+    EMAIL_ENABLED: bool = Field(True, description="Enable email notifications")
     SMTP_SERVER: str = Field("smtp.gmail.com", description="SMTP server")
     SMTP_PORT: int = Field(587, description="SMTP port")
     SMTP_USER: Optional[str] = Field(None, description="SMTP username")
